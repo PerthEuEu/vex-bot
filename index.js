@@ -5,6 +5,7 @@ const app = express();
 app.get("/", (req, res) => res.send("VEX BOT ONLINE"));
 app.listen(process.env.PORT || 10000);
 
+// ================= DISCORD =================
 const {
     Client,
     GatewayIntentBits,
@@ -13,7 +14,10 @@ const {
     ButtonBuilder,
     ButtonStyle,
     Events,
-    StringSelectMenuBuilder
+    StringSelectMenuBuilder,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle
 } = require("discord.js");
 
 const db = require("./database/database");
@@ -22,26 +26,11 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-// ================= CONFIG =================
-const SELL_LOG = process.env.SELL_LOG_CHANNEL_ID;
-
-// ================= MEMORY =================
+// ================= STATE =================
 const reserve = new Map();
 const lockUser = new Set();
 
-// ================= LOG =================
-const log = (msg) => console.log(`[SYSTEM] ${msg}`);
-
-// ================= SAFE REPLY =================
-async function safeReply(interaction, data) {
-    try {
-        if (interaction.deferred) return interaction.editReply(data);
-        if (interaction.replied) return interaction.followUp(data);
-        return interaction.reply(data);
-    } catch (e) {
-        console.log("safeReply error:", e?.message || e);
-    }
-}
+const log = (m) => console.log(`[SYSTEM] ${m}`);
 
 // ================= READY =================
 client.once(Events.ClientReady, () => {
@@ -56,36 +45,38 @@ try {
     if (interaction.isChatInputCommand() && interaction.commandName === "panel") {
 
         return interaction.reply({
+            ephemeral: true,
             embeds: [
                 new EmbedBuilder().setTitle("📦 STOCK PANEL")
             ],
             components: [
                 new ActionRowBuilder().addComponents(
                     new ButtonBuilder()
-                        .setCustomId("sell")
-                        .setLabel("🔑 SELL KEY")
+                        .setCustomId("sell_open")
+                        .setLabel("🔑 SELL")
                         .setStyle(ButtonStyle.Primary),
 
                     new ButtonBuilder()
-                        .setCustomId("addstock")
+                        .setCustomId("stock_open")
                         .setLabel("📥 ADD STOCK")
                         .setStyle(ButtonStyle.Success)
                 )
-            ],
-            ephemeral: true
+            ]
         });
     }
 
-    // ================= ADD STOCK (FIXED) =================
-    if (interaction.isButton() && interaction.customId === "addstock") {
+    // ================= OPEN STOCK =================
+    if (interaction.isButton() && interaction.customId === "stock_open") {
 
         const products = await db.getProducts();
+
         if (!products?.length) {
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
         }
 
         const menu = new StringSelectMenuBuilder()
-            .setCustomId("stock_select") // ✅ FIX สำคัญ
+            .setCustomId("stock_select")
+            .setPlaceholder("📦 เลือกสินค้า")
             .addOptions(
                 products.slice(0, 25).map(p => ({
                     label: p.name.slice(0, 100),
@@ -94,22 +85,67 @@ try {
             );
 
         return interaction.reply({
-            content: "📦 เลือกสินค้าที่ต้องการเติมสต็อก",
-            components: [new ActionRowBuilder().addComponents(menu)],
+            ephemeral: true,
+            content: "📥 เลือกสินค้าเพื่อเติมสต็อก",
+            components: [new ActionRowBuilder().addComponents(menu)]
+        });
+    }
+
+    // ================= STOCK SELECT =================
+    if (interaction.isStringSelectMenu() && interaction.customId === "stock_select") {
+
+        const product = interaction.values[0];
+
+        const modal = new ModalBuilder()
+            .setCustomId(`stock_modal_${product}`)
+            .setTitle(`📥 เติมสต็อก ${product}`);
+
+        const input = new TextInputBuilder()
+            .setCustomId("keys")
+            .setLabel("ใส่คีย์ (ขึ้นบรรทัดใหม่)")
+            .setStyle(TextInputStyle.Paragraph)
+            .setPlaceholder("key1\nkey2\nkey3")
+            .setRequired(true);
+
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(input)
+        );
+
+        return interaction.showModal(modal);
+    }
+
+    // ================= STOCK SUBMIT =================
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("stock_modal_")) {
+
+        const product = interaction.customId.replace("stock_modal_", "");
+        const raw = interaction.fields.getTextInputValue("keys");
+
+        const keys = raw.split("\n").map(k => k.trim()).filter(Boolean);
+
+        if (!keys.length) {
+            return interaction.reply({ content: "❌ ไม่มี key", ephemeral: true });
+        }
+
+        await db.addKeys(product, keys);
+
+        return interaction.reply({
+            content: `✅ เติมสต็อกสำเร็จ **${product}** (+${keys.length})`,
             ephemeral: true
         });
     }
 
-    // ================= SELL =================
-    if (interaction.isButton() && interaction.customId === "sell") {
+    // ================= SELL OPEN =================
+    if (interaction.isButton() && interaction.customId === "sell_open") {
 
         const products = await db.getProducts();
+
         if (!products?.length) {
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
         }
 
         const menu = new StringSelectMenuBuilder()
             .setCustomId("sell_select")
+            .setPlaceholder("📦 เลือกสินค้า")
             .addOptions(
                 products.slice(0, 25).map(p => ({
                     label: p.name.slice(0, 100),
@@ -118,9 +154,9 @@ try {
             );
 
         return interaction.reply({
-            content: "📦 เลือกสินค้า (ขาย)",
-            components: [new ActionRowBuilder().addComponents(menu)],
-            ephemeral: true
+            ephemeral: true,
+            content: "📦 เลือกสินค้า",
+            components: [new ActionRowBuilder().addComponents(menu)]
         });
     }
 
@@ -137,18 +173,14 @@ try {
             ]);
 
         return interaction.reply({
+            ephemeral: true,
             content: "💰 เลือกประเภท",
-            components: [new ActionRowBuilder().addComponents(typeMenu)],
-            ephemeral: true
+            components: [new ActionRowBuilder().addComponents(typeMenu)]
         });
     }
 
     // ================= SELL TYPE =================
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("sell_type_")) {
-
-        if (!interaction.deferred && !interaction.replied) {
-            await interaction.deferReply({ ephemeral: true });
-        }
 
         const product = interaction.customId.replace("sell_type_", "");
         const type = interaction.values[0];
@@ -156,24 +188,22 @@ try {
         const p = await db.getProduct(product);
         const stock = await db.getStock(product);
 
-        if (!p) return interaction.editReply("❌ no product");
-        if (stock <= 0) return interaction.editReply("❌ คีย์หมด");
+        if (!p) return interaction.reply({ content: "❌ no product", ephemeral: true });
+        if (stock <= 0) return interaction.reply({ content: "❌ หมด stock", ephemeral: true });
 
         reserve.set(interaction.user.id, { product, type });
 
         const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
-        const cost = Number(p.cost || 0);
 
-        return interaction.editReply({
+        return interaction.reply({
+            ephemeral: true,
             embeds: [
                 new EmbedBuilder()
                     .setTitle("CONFIRM SELL")
                     .addFields(
                         { name: "Product", value: product },
                         { name: "Type", value: type },
-                        { name: "Cost", value: `${cost}` },
                         { name: "Price", value: `${price}` },
-                        { name: "Profit", value: `${price - cost}` },
                         { name: "Stock", value: `${stock}` }
                     )
             ],
@@ -188,37 +218,35 @@ try {
         });
     }
 
-    // ================= CONFIRM =================
+    // ================= CONFIRM SELL =================
     if (interaction.isButton() && interaction.customId === "confirm_sell") {
 
-        if (!interaction.deferred && !interaction.replied) {
-            await interaction.deferReply({ ephemeral: true });
-        }
-
         if (lockUser.has(interaction.user.id)) {
-            return interaction.editReply("❌ กำลังทำรายการ");
+            return interaction.reply({ content: "❌ busy", ephemeral: true });
         }
 
         const data = reserve.get(interaction.user.id);
         if (!data) {
-            return interaction.editReply("❌ session หมด");
+            return interaction.reply({ content: "❌ session expired", ephemeral: true });
         }
 
         lockUser.add(interaction.user.id);
 
         try {
 
-            const { product, type } = data;
+            const key = await db.claimKey(data.product);
 
-            const key = await db.claimKey(product);
             if (!key) {
                 reserve.delete(interaction.user.id);
-                return interaction.editReply("❌ คีย์หมด");
+                return interaction.reply({ content: "❌ out of stock", ephemeral: true });
             }
 
             reserve.delete(interaction.user.id);
 
-            return interaction.editReply(`🔑 KEY: ${key.key}`);
+            return interaction.reply({
+                content: `🔑 KEY: ${key.key}`,
+                ephemeral: true
+            });
 
         } finally {
             lockUser.delete(interaction.user.id);

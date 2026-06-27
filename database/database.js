@@ -1,135 +1,226 @@
-const Database = require("better-sqlite3");
-const db = new Database("vex.db");
+require("dotenv").config();
+const { createClient } = require("@supabase/supabase-js");
 
-// ================= TABLES =================
-db.prepare(`
-CREATE TABLE IF NOT EXISTS products (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE,
-    cost INTEGER DEFAULT 0,
-    resell_price INTEGER DEFAULT 0,
-    customer_price INTEGER DEFAULT 0
-)
-`).run();
-
-db.prepare(`
-CREATE TABLE IF NOT EXISTS keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    product_name TEXT,
-    key TEXT,
-    status TEXT DEFAULT 'available'
-)
-`).run();
-
-db.prepare(`
-CREATE TABLE IF NOT EXISTS pending_keys (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_id TEXT,
-    product_name TEXT,
-    key_id INTEGER,
-    key TEXT,
-    type TEXT,
-    price INTEGER,
-    profit INTEGER,
-    status TEXT DEFAULT 'pending'
-)
-`).run();
-
-// ================= PRODUCTS =================
-function addProduct(name, cost, resell_price, customer_price) {
-    if (!name) return;
-
-    return db.prepare(`
-        INSERT OR IGNORE INTO products
-        (name, cost, resell_price, customer_price)
-        VALUES (?, ?, ?, ?)
-    `).run(name, cost || 0, resell_price || 0, customer_price || 0);
+// =====================
+// ENV CHECK (ต้องหยุดถ้าพัง)
+// =====================
+if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
+    console.log("❌ Supabase env missing!");
+    process.exit(1);
 }
 
-function getProduct(name) {
-    return db.prepare(`SELECT * FROM products WHERE name=?`).get(name);
+// =====================
+// SUPABASE CLIENT
+// =====================
+const supabase = createClient(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_KEY
+);
+
+// =====================
+// ERROR LOGGER
+// =====================
+function logError(action, error) {
+    if (!error) return;
+
+    console.log(`❌ Supabase Error [${action}]`);
+    console.log("Message:", error.message);
+    console.log("Code:", error.code || "unknown");
+    console.log("Details:", error.details || "none");
 }
 
-function getProducts() {
-    return db.prepare(`SELECT * FROM products ORDER BY name`).all();
+// =====================
+// PRODUCTS
+// =====================
+async function addProduct(name, cost = 0, resell_price = 0, customer_price = 0) {
+
+    if (!name) return null;
+
+    const { data, error } = await supabase
+        .from("products")
+        .insert([{
+            name,
+            cost,
+            resell_price,
+            customer_price
+        }])
+        .select()
+        .single();
+
+    logError("addProduct", error);
+
+    return data || null;
 }
 
-// ================= KEYS =================
-function addKeys(productName, keysArray) {
-    if (!productName || !Array.isArray(keysArray)) return;
+async function getProduct(name) {
 
-    const stmt = db.prepare(`
-        INSERT INTO keys (product_name, key, status)
-        VALUES (?, ?, 'available')
-    `);
+    if (!name) return null;
 
-    const tx = db.transaction((keys) => {
-        for (const k of keys) {
-            if (k?.trim()) stmt.run(productName, k.trim());
-        }
-    });
+    const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .eq("name", name)
+        .single();
 
-    tx(keysArray);
+    logError("getProduct", error);
+
+    return data || null;
 }
 
-function getStock(productName) {
-    return db.prepare(`
-        SELECT COUNT(*) as count
-        FROM keys
-        WHERE product_name=? AND status='available'
-    `).get(productName) || { count: 0 };
+async function getProducts() {
+
+    const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .order("name", { ascending: true });
+
+    logError("getProducts", error);
+
+    return Array.isArray(data) ? data : [];
 }
 
-function getRandomKey(productName) {
-    return db.prepare(`
-        SELECT * FROM keys
-        WHERE product_name=? AND status='available'
-        ORDER BY RANDOM()
-        LIMIT 1
-    `).get(productName);
+// =====================
+// KEYS
+// =====================
+async function addKeys(productName, keysArray = []) {
+
+    if (!productName || !Array.isArray(keysArray)) return null;
+
+    const rows = keysArray
+        .map(k => k?.trim())
+        .filter(Boolean)
+        .map(k => ({
+            product_name: productName,
+            key: k,
+            status: "available"
+        }));
+
+    if (rows.length === 0) return null;
+
+    const { data, error } = await supabase
+        .from("keys")
+        .insert(rows)
+        .select();
+
+    logError("addKeys", error);
+
+    return data || [];
 }
 
-// ================= LOCK SYSTEM =================
-function lockKey(data) {
-    return db.prepare(`
-        INSERT INTO pending_keys
-        (user_id, product_name, key_id, key, type, price, profit)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run(
-        data.user_id,
-        data.product_name,
-        data.key_id,
-        data.key,
-        data.type,
-        data.price,
-        data.profit
-    );
+async function getStock(productName) {
+
+    const { count, error } = await supabase
+        .from("keys")
+        .select("*", { count: "exact", head: true })
+        .eq("product_name", productName)
+        .eq("status", "available");
+
+    logError("getStock", error);
+
+    return { count: count || 0 };
 }
 
-function confirmKey(id) {
-    const item = db.prepare(`SELECT * FROM pending_keys WHERE id=?`).get(id);
-    if (!item) return null;
+async function getRandomKey(productName) {
 
-    db.prepare(`UPDATE keys SET status='used' WHERE id=?`).run(item.key_id);
-    db.prepare(`UPDATE pending_keys SET status='confirmed' WHERE id=?`).run(id);
+    const { data, error } = await supabase
+        .from("keys")
+        .select("*")
+        .eq("product_name", productName)
+        .eq("status", "available");
+
+    logError("getRandomKey", error);
+
+    if (!Array.isArray(data) || data.length === 0) return null;
+
+    return data[Math.floor(Math.random() * data.length)];
+}
+
+// =====================
+// LOCK SYSTEM
+// =====================
+async function lockKey(payload) {
+
+    if (!payload?.key_id) return null;
+
+    const { data, error } = await supabase
+        .from("pending_keys")
+        .insert([{
+            user_id: payload.user_id,
+            product_name: payload.product_name,
+            key_id: payload.key_id,
+            key: payload.key,
+            type: payload.type,
+            price: payload.price,
+            profit: payload.profit,
+            status: "pending"
+        }])
+        .select()
+        .single();
+
+    logError("lockKey", error);
+
+    return data || null;
+}
+
+async function confirmKey(id) {
+
+    const { data: item, error } = await supabase
+        .from("pending_keys")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+    logError("confirmKey/select", error);
+
+    if (!item || item.status !== "pending") return item;
+
+    await supabase
+        .from("keys")
+        .update({ status: "used" })
+        .eq("id", item.key_id);
+
+    await supabase
+        .from("pending_keys")
+        .update({ status: "confirmed" })
+        .eq("id", id);
 
     return item;
 }
 
-function cancelKey(id) {
-    return db.prepare(`
-        UPDATE pending_keys SET status='cancelled' WHERE id=?
-    `).run(id);
+async function cancelKey(id) {
+
+    const { data: item, error } = await supabase
+        .from("pending_keys")
+        .select("*")
+        .eq("id", id)
+        .single();
+
+    logError("cancelKey/select", error);
+
+    if (!item || item.status !== "pending") return item;
+
+    await supabase
+        .from("pending_keys")
+        .update({ status: "cancelled" })
+        .eq("id", id);
+
+    return item;
 }
 
+// =====================
+// EXPORT
+// =====================
 module.exports = {
-    db,
+    supabase,
+
     addProduct,
     getProduct,
     getProducts,
+
     addKeys,
     getStock,
     getRandomKey,
+
     lockKey,
     confirmKey,
     cancelKey

@@ -2,7 +2,7 @@ require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 
 // =====================
-// ENV CHECK (ต้องหยุดถ้าพัง)
+// ENV CHECK
 // =====================
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
     console.log("❌ Supabase env missing!");
@@ -34,8 +34,6 @@ function logError(action, error) {
 // =====================
 async function addProduct(name, cost = 0, resell_price = 0, customer_price = 0) {
 
-    if (!name) return null;
-
     const { data, error } = await supabase
         .from("products")
         .insert([{
@@ -48,13 +46,10 @@ async function addProduct(name, cost = 0, resell_price = 0, customer_price = 0) 
         .single();
 
     logError("addProduct", error);
-
     return data || null;
 }
 
 async function getProduct(name) {
-
-    if (!name) return null;
 
     const { data, error } = await supabase
         .from("products")
@@ -63,7 +58,6 @@ async function getProduct(name) {
         .single();
 
     logError("getProduct", error);
-
     return data || null;
 }
 
@@ -75,7 +69,6 @@ async function getProducts() {
         .order("name", { ascending: true });
 
     logError("getProducts", error);
-
     return Array.isArray(data) ? data : [];
 }
 
@@ -83,8 +76,6 @@ async function getProducts() {
 // KEYS
 // =====================
 async function addKeys(productName, keysArray = []) {
-
-    if (!productName || !Array.isArray(keysArray)) return null;
 
     const rows = keysArray
         .map(k => k?.trim())
@@ -95,7 +86,7 @@ async function addKeys(productName, keysArray = []) {
             status: "available"
         }));
 
-    if (rows.length === 0) return null;
+    if (!rows.length) return [];
 
     const { data, error } = await supabase
         .from("keys")
@@ -103,7 +94,6 @@ async function addKeys(productName, keysArray = []) {
         .select();
 
     logError("addKeys", error);
-
     return data || [];
 }
 
@@ -116,10 +106,10 @@ async function getStock(productName) {
         .eq("status", "available");
 
     logError("getStock", error);
-
     return { count: count || 0 };
 }
 
+// 🔥 IMPORTANT: ดึงเฉพาะ available
 async function getRandomKey(productName) {
 
     const { data, error } = await supabase
@@ -130,17 +120,26 @@ async function getRandomKey(productName) {
 
     logError("getRandomKey", error);
 
-    if (!Array.isArray(data) || data.length === 0) return null;
+    if (!data?.length) return null;
 
     return data[Math.floor(Math.random() * data.length)];
+}
+
+// 🔥 IMPORTANT FIX: MARK KEY USED (ตัวที่คุณขาด)
+async function markKeyUsed(keyId) {
+
+    const { error } = await supabase
+        .from("keys")
+        .update({ status: "used" })
+        .eq("id", keyId);
+
+    logError("markKeyUsed", error);
 }
 
 // =====================
 // LOCK SYSTEM
 // =====================
 async function lockKey(payload) {
-
-    if (!payload?.key_id) return null;
 
     const { data, error } = await supabase
         .from("pending_keys")
@@ -158,7 +157,6 @@ async function lockKey(payload) {
         .single();
 
     logError("lockKey", error);
-
     return data || null;
 }
 
@@ -170,14 +168,12 @@ async function confirmKey(id) {
         .eq("id", id)
         .single();
 
-    logError("confirmKey/select", error);
+    logError("confirmKey", error);
 
     if (!item || item.status !== "pending") return item;
 
-    await supabase
-        .from("keys")
-        .update({ status: "used" })
-        .eq("id", item.key_id);
+    // 🔥 FIX สำคัญ: ต้อง mark used
+    await markKeyUsed(item.key_id);
 
     await supabase
         .from("pending_keys")
@@ -195,7 +191,7 @@ async function cancelKey(id) {
         .eq("id", id)
         .single();
 
-    logError("cancelKey/select", error);
+    logError("cancelKey", error);
 
     if (!item || item.status !== "pending") return item;
 
@@ -223,5 +219,6 @@ module.exports = {
 
     lockKey,
     confirmKey,
-    cancelKey
+    cancelKey,
+    markKeyUsed
 };

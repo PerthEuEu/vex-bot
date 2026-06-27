@@ -11,7 +11,6 @@ const supabase = createClient(
     process.env.SUPABASE_KEY
 );
 
-// ================= ERROR =================
 function logError(action, error) {
     if (!error) return;
     console.log(`❌ Supabase Error [${action}]`);
@@ -76,7 +75,6 @@ async function addKeys(product_name, keysArray = []) {
 
 // ================= STOCK =================
 async function getStock(product_name) {
-
     const { count, error } = await supabase
         .from("keys")
         .select("*", { count: "exact", head: true })
@@ -85,13 +83,15 @@ async function getStock(product_name) {
 
     logError("getStock", error);
 
-    return { count: Number(count || 0) };
+    return {
+        count: Number(count || 0)
+    };
 }
 
-// ================= 🔥 FIX CORE (LOCK KEY INSTANT) =================
+// ================= 🔥 FIXED CLAIM KEY (NO DOUBLE SELL) =================
 async function claimKey(product_name) {
 
-    // 👉 สำคัญ: ไม่ random ก่อน
+    // 1) ดึง key ที่ยังใช้ได้ 1 อัน
     const { data, error } = await supabase
         .from("keys")
         .select("*")
@@ -105,7 +105,7 @@ async function claimKey(product_name) {
 
     const key = data[0];
 
-    // 🔥 atomic lock
+    // 2) ล็อคทันที (กันคนอื่นกดแย่ง)
     const { data: locked, error: lockErr } = await supabase
         .from("keys")
         .update({
@@ -119,10 +119,11 @@ async function claimKey(product_name) {
 
     logError("claimKey-lock", lockErr);
 
-    return locked || null;
+    if (!locked) return null;
+
+    return locked;
 }
 
-// ================= EXPORT =================
 module.exports = {
     supabase,
     addProduct,

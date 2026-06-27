@@ -1,242 +1,199 @@
 require("dotenv").config();
-const { createClient } = require("@supabase/supabase-js");
+const express = require("express");
+const app = express();
 
-// ===================== ENV =====================
-if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
-    console.log("❌ Supabase env missing!");
-    process.exit(1);
+app.get("/", (req, res) => res.send("VEX BOT ONLINE"));
+
+app.listen(process.env.PORT || 10000, () => {
+    console.log("🌐 Express running");
+});
+
+// ================= DISCORD =================
+const {
+    Client,
+    GatewayIntentBits,
+    EmbedBuilder,
+    ActionRowBuilder,
+    ButtonBuilder,
+    ButtonStyle,
+    Events,
+    StringSelectMenuBuilder,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle
+} = require("discord.js");
+
+const db = require("./database/database");
+
+const client = new Client({
+    intents: [GatewayIntentBits.Guilds]
+});
+
+const SELL_LOG = process.env.SELL_LOG_CHANNEL_ID;
+const STOCK_LOG = process.env.STOCK_LOG_CHANNEL_ID;
+
+function sendLog(id, embed) {
+    const ch = client.channels.cache.get(id);
+    if (ch) ch.send({ embeds: [embed] }).catch(() => {});
 }
 
-// ===================== CLIENT =====================
-const supabase = createClient(
-    process.env.SUPABASE_URL,
-    process.env.SUPABASE_KEY
-);
+client.once(Events.ClientReady, () => {
+    console.log("✅ BOT READY");
+});
 
-// ===================== ERROR =====================
-function logError(action, error) {
-    if (!error) return;
+// ================= MAIN =================
+client.on(Events.InteractionCreate, async (interaction) => {
+try {
 
-    console.log(`❌ Supabase Error [${action}]`);
-    console.log("Message:", error.message);
-    console.log("Code:", error.code || "unknown");
-    console.log("Details:", error.details || "none");
+    // ================= STOCK OPEN =================
+    if (interaction.isButton() && interaction.customId === "stock_open") {
+
+        const products = await db.getProducts();
+
+        const menu = new StringSelectMenuBuilder()
+            .setCustomId("stock_select")
+            .setPlaceholder("เลือกสินค้า")
+            .addOptions(products.slice(0, 25).map(p => ({
+                label: p.name,
+                value: p.name
+            })));
+
+        return interaction.reply({
+            content: "📦 เลือกสินค้า",
+            components: [new ActionRowBuilder().addComponents(menu)],
+            ephemeral: true
+        });
+    }
+
+    // ================= ADD STOCK =================
+    if (interaction.isStringSelectMenu() && interaction.customId === "stock_select") {
+
+        const product = interaction.values[0];
+
+        const modal = new ModalBuilder()
+            .setCustomId(`add_stock_${product}`)
+            .setTitle("เติมสต็อค");
+
+        modal.addComponents(
+            new ActionRowBuilder().addComponents(
+                new TextInputBuilder()
+                    .setCustomId("keys")
+                    .setLabel("keys")
+                    .setStyle(TextInputStyle.Paragraph)
+            )
+        );
+
+        return interaction.showModal(modal);
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId.startsWith("add_stock_")) {
+
+        const product = interaction.customId.replace("add_stock_", "");
+
+        const keys = interaction.fields.getTextInputValue("keys")
+            .split("\n")
+            .map(x => x.trim())
+            .filter(Boolean);
+
+        await db.addKeys(product, keys);
+
+        const stock = await db.getStock(product);
+
+        sendLog(STOCK_LOG,
+            new EmbedBuilder()
+                .setTitle("STOCK ADDED")
+                .addFields(
+                    { name: "Product", value: product },
+                    { name: "Amount", value: String(keys.length) },
+                    { name: "Stock", value: String(stock) }
+                )
+        );
+
+        return interaction.reply({
+            content: `✅ added ${keys.length}`,
+            ephemeral: true
+        });
+    }
+
+    // ================= SELL =================
+    if (interaction.isButton() && interaction.customId === "sell_open") {
+
+        const products = await db.getProducts();
+
+        const menu = new StringSelectMenuBuilder()
+            .setCustomId("sell_select")
+            .setPlaceholder("เลือกสินค้า")
+            .addOptions(products.slice(0, 25).map(p => ({
+                label: p.name,
+                value: p.name
+            })));
+
+        return interaction.reply({
+            content: "SELL",
+            components: [new ActionRowBuilder().addComponents(menu)],
+            ephemeral: true
+        });
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === "sell_select") {
+
+        const product = interaction.values[0];
+
+        const menu = new StringSelectMenuBuilder()
+            .setCustomId(`sell_type_${product}`)
+            .addOptions([
+                { label: "Reseller", value: "reseller" },
+                { label: "Customer", value: "customer" }
+            ]);
+
+        return interaction.reply({
+            content: "เลือก type",
+            components: [new ActionRowBuilder().addComponents(menu)],
+            ephemeral: true
+        });
+    }
+
+    // ================= SELL TYPE =================
+    if (interaction.isStringSelectMenu() && interaction.customId.startsWith("sell_type_")) {
+
+        const product = interaction.customId.replace("sell_type_", "");
+        const type = interaction.values[0];
+
+        const key = await db.claimKey(product);
+        const p = await db.getProduct(product);
+
+        if (!key) {
+            return interaction.reply({
+                content: "❌ OUT OF STOCK",
+                ephemeral: true
+            });
+        }
+
+        const price = type === "reseller" ? p.resell_price : p.customer_price;
+
+        await db.useKey(key.id);
+
+        sendLog(SELL_LOG,
+            new EmbedBuilder()
+                .setTitle("SELL LOG")
+                .addFields(
+                    { name: "Product", value: product },
+                    { name: "Key", value: key.key }
+                )
+        );
+
+        return interaction.reply({
+            content: `KEY: ${key.key}`,
+            ephemeral: true
+        });
+    }
+
+} catch (e) {
+    console.log(e);
+    if (!interaction.replied) {
+        return interaction.reply({ content: "error", ephemeral: true });
+    }
 }
+});
 
-// ===================== CATEGORY (🔥 FIX ADDED) =====================
-async function getCategories() {
-    const { data, error } = await supabase
-        .from("categories")
-        .select("*")
-        .order("name", { ascending: true });
-
-    logError("getCategories", error);
-    return Array.isArray(data) ? data : [];
-}
-
-// ===================== PRODUCTS =====================
-async function addProduct(name, cost = 0, resell_price = 0, customer_price = 0) {
-
-    const { data, error } = await supabase
-        .from("products")
-        .insert([{ name, cost, resell_price, customer_price }])
-        .select()
-        .maybeSingle();
-
-    logError("addProduct", error);
-    return data || null;
-}
-
-async function getProduct(name) {
-
-    const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("name", name)
-        .maybeSingle();
-
-    logError("getProduct", error);
-    return data || null;
-}
-
-async function getProducts() {
-
-    const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .order("name", { ascending: true });
-
-    logError("getProducts", error);
-    return Array.isArray(data) ? data : [];
-}
-
-// ===================== BY CATEGORY (🔥 FIX ADDED) =====================
-async function getProductsByCategory(category) {
-
-    const { data, error } = await supabase
-        .from("products")
-        .select("*")
-        .eq("category", category)
-        .order("name", { ascending: true });
-
-    logError("getProductsByCategory", error);
-    return Array.isArray(data) ? data : [];
-}
-
-// ===================== KEYS =====================
-async function addKeys(productName, keysArray = []) {
-
-    const rows = keysArray
-        .map(k => k?.trim())
-        .filter(Boolean)
-        .map(k => ({
-            product_name: productName,
-            key: k,
-            status: "available"
-        }));
-
-    if (!rows.length) return [];
-
-    const { data, error } = await supabase
-        .from("keys")
-        .insert(rows)
-        .select();
-
-    logError("addKeys", error);
-    return data || [];
-}
-
-// ===================== STOCK =====================
-async function getStock(productName) {
-
-    const { count, error } = await supabase
-        .from("keys")
-        .select("*", { count: "exact", head: true })
-        .eq("product_name", productName)
-        .eq("status", "available");
-
-    logError("getStock", error);
-
-    return {
-        count: count || 0
-    };
-}
-
-// ===================== RANDOM KEY =====================
-async function getRandomKey(productName) {
-
-    const { data, error } = await supabase
-        .from("keys")
-        .select("id, key, product_name")
-        .eq("product_name", productName)
-        .eq("status", "available");
-
-    logError("getRandomKey", error);
-
-    if (!data?.length) return null;
-
-    return data[Math.floor(Math.random() * data.length)];
-}
-
-// ===================== MARK USED (SAFE) =====================
-async function markKeyUsed(keyId) {
-
-    const { data, error } = await supabase
-        .from("keys")
-        .update({
-            status: "used",
-            used_at: new Date().toISOString()
-        })
-        .eq("id", keyId)
-        .eq("status", "available")
-        .select()
-        .maybeSingle();
-
-    logError("markKeyUsed", error);
-    return data || null;
-}
-
-// ===================== PENDING SYSTEM =====================
-async function lockKey(payload) {
-
-    const { data, error } = await supabase
-        .from("pending_keys")
-        .insert([{
-            user_id: payload.user_id,
-            product_name: payload.product_name,
-            key_id: payload.key_id,
-            key: payload.key,
-            type: payload.type,
-            price: payload.price,
-            profit: payload.profit,
-            status: "pending"
-        }])
-        .select()
-        .maybeSingle();
-
-    logError("lockKey", error);
-    return data || null;
-}
-
-async function confirmKey(id) {
-
-    const { data: item, error } = await supabase
-        .from("pending_keys")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
-
-    logError("confirmKey", error);
-
-    if (!item || item.status !== "pending") return null;
-
-    await markKeyUsed(item.key_id);
-
-    await supabase
-        .from("pending_keys")
-        .update({ status: "confirmed" })
-        .eq("id", id);
-
-    return item;
-}
-
-async function cancelKey(id) {
-
-    const { data: item, error } = await supabase
-        .from("pending_keys")
-        .select("*")
-        .eq("id", id)
-        .maybeSingle();
-
-    logError("cancelKey", error);
-
-    if (!item || item.status !== "pending") return null;
-
-    await supabase
-        .from("pending_keys")
-        .update({ status: "cancelled" })
-        .eq("id", id);
-
-    return item;
-}
-
-// ===================== EXPORT =====================
-module.exports = {
-    supabase,
-
-    addProduct,
-    getProduct,
-    getProducts,
-
-    getCategories,
-    getProductsByCategory,
-
-    addKeys,
-    getStock,
-    getRandomKey,
-
-    lockKey,
-    confirmKey,
-    cancelKey,
-    markKeyUsed
-};
+client.login(process.env.TOKEN);

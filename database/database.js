@@ -36,7 +36,7 @@ async function getProduct(name) {
         .from("products")
         .select("*")
         .eq("name", name)
-        .single();
+        .maybeSingle(); // 🔥 FIX กัน crash
 
     logError("getProduct", error);
     return data || null;
@@ -75,8 +75,9 @@ async function addKeys(product_name, keysArray = []) {
     return data || [];
 }
 
-// ================= STOCK (FIXED) =================
+// ================= STOCK (FIXED SAFE) =================
 async function getStock(product_name) {
+
     const { count, error } = await supabase
         .from("keys")
         .select("*", { count: "exact", head: true })
@@ -85,10 +86,12 @@ async function getStock(product_name) {
 
     logError("getStock", error);
 
-    return Number(count || 0);
+    return {
+        count: Number(count || 0)
+    }; // 🔥 FIX ไม่ให้ undefined
 }
 
-// ================= RANDOM KEY (SAFE) =================
+// ================= RANDOM KEY =================
 async function getRandomKey(product_name) {
 
     const { data, error } = await supabase
@@ -101,12 +104,10 @@ async function getRandomKey(product_name) {
 
     if (!Array.isArray(data) || data.length === 0) return null;
 
-    // random กัน predictable
-    const idx = Math.floor(Math.random() * data.length);
-    return data[idx];
+    return data[Math.floor(Math.random() * data.length)];
 }
 
-// ================= USE KEY (ATOMIC FIX) =================
+// ================= USE KEY (ANTI DOUBLE CLICK FIX) =================
 async function useKey(keyId) {
 
     if (!keyId) return null;
@@ -118,9 +119,9 @@ async function useKey(keyId) {
             used_at: new Date().toISOString()
         })
         .eq("id", keyId)
-        .eq("status", "available") // กันกดซ้ำ
+        .eq("status", "available") // 🔥 กันยิงซ้ำ
         .select()
-        .single();
+        .maybeSingle(); // 🔥 FIX กัน crash
 
     logError("useKey", error);
 

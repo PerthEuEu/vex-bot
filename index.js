@@ -38,14 +38,12 @@ client.once(Events.ClientReady, () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-// ================= SAFE REPLY =================
+// ================= SAFE =================
 async function safeReply(interaction, data) {
     try {
         if (interaction.replied || interaction.deferred) return;
         return await interaction.reply(data);
-    } catch (err) {
-        console.log("safeReply error:", err.message);
-    }
+    } catch {}
 }
 
 // ================= MAIN =================
@@ -75,7 +73,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (interaction.isButton() && interaction.customId === "addstock") {
             const products = await db.getProducts();
 
-            if (!Array.isArray(products) || products.length === 0) {
+            if (!products.length) {
                 return safeReply(interaction, {
                     content: "❌ ไม่มีสินค้า",
                     flags: MessageFlags.Ephemeral
@@ -98,6 +96,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         // ================= STOCK SELECT =================
         if (interaction.isStringSelectMenu() && interaction.customId === "stock_select") {
+
             const product = interaction.values?.[0];
             if (!product) return;
 
@@ -118,6 +117,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         // ================= ADD STOCK =================
         if (interaction.isModalSubmit() && interaction.customId.startsWith("add_stock_")) {
+
             const product = interaction.customId.replace("add_stock_", "");
 
             const keys = interaction.fields.getTextInputValue("keys")
@@ -137,7 +137,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                             .addFields(
                                 { name: "Product", value: product },
                                 { name: "Added", value: `${keys.length}` },
-                                { name: "Stock", value: `${stock}` }
+                                { name: "Stock", value: `${stock.count}` }
                             )
                     ]
                 });
@@ -151,14 +151,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
         // ================= SELL =================
         if (interaction.isButton() && interaction.customId === "sell") {
-            const products = await db.getProducts();
 
-            if (!Array.isArray(products) || products.length === 0) {
-                return interaction.reply({
-                    content: "❌ ไม่มีสินค้า",
-                    ephemeral: true
-                });
-            }
+            const products = await db.getProducts();
 
             const menu = new StringSelectMenuBuilder()
                 .setCustomId("sell_select")
@@ -174,22 +168,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
-        // ================= SELL TYPE =================
+        // ================= SELL SELECT =================
         if (interaction.isStringSelectMenu() && interaction.customId === "sell_select") {
 
             const product = interaction.values?.[0];
             if (!product) return;
-
-            const p = await db.getProduct(product);
-            const key = await db.getRandomKey(product);
-            const stock = await db.getStock(product);
-
-            if (!p || !key) {
-                return safeReply(interaction, {
-                    content: "❌ out of stock",
-                    flags: MessageFlags.Ephemeral
-                });
-            }
 
             const typeMenu = new StringSelectMenuBuilder()
                 .setCustomId(`sell_type_${product}`)
@@ -205,7 +188,49 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
-        // ================= CONFIRM =================
+        // ================= SELL TYPE =================
+        if (interaction.isStringSelectMenu() && interaction.customId.startsWith("sell_type_")) {
+
+            const product = interaction.customId.replace("sell_type_", "");
+            const type = interaction.values[0];
+
+            const p = await db.getProduct(product);
+            const key = await db.getRandomKey(product);
+            const stock = await db.getStock(product);
+
+            if (!p || !key) {
+                return interaction.reply({
+                    content: "❌ out of stock",
+                    ephemeral: true
+                });
+            }
+
+            const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
+
+            const embed = new EmbedBuilder()
+                .setTitle("CONFIRM SELL")
+                .addFields(
+                    { name: "Product", value: product },
+                    { name: "Type", value: type },
+                    { name: "Price", value: `${price}` },
+                    { name: "Stock", value: `${stock.count}` }
+                );
+
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder()
+                    .setCustomId(`confirm_${product}_${type}`)
+                    .setLabel("CONFIRM")
+                    .setStyle(ButtonStyle.Success)
+            );
+
+            return interaction.reply({
+                embeds: [embed],
+                components: [row],
+                flags: MessageFlags.Ephemeral
+            });
+        }
+
+        // ================= CONFIRM (FIXED 100%) =================
         if (interaction.isButton() && interaction.customId.startsWith("confirm_")) {
 
             if (usedConfirm.has(interaction.user.id)) {
@@ -218,20 +243,20 @@ client.on(Events.InteractionCreate, async (interaction) => {
             usedConfirm.add(interaction.user.id);
 
             try {
-                const product = interaction.message.embeds?.[0]?.data?.fields?.[0]?.value;
+                const parts = interaction.customId.split("_");
+                const product = parts[1];
+                const type = parts[2];
 
                 const p = await db.getProduct(product);
                 const key = await db.getRandomKey(product);
 
                 if (!p || !key) {
-                    usedConfirm.delete(interaction.user.id);
                     return interaction.reply({ content: "❌ error", ephemeral: true });
                 }
 
                 const locked = await db.useKey(key.id);
 
                 if (!locked) {
-                    usedConfirm.delete(interaction.user.id);
                     return interaction.reply({ content: "❌ key used", ephemeral: true });
                 }
 
@@ -243,7 +268,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
                                 .addFields(
                                     { name: "User", value: `<@${interaction.user.id}>` },
                                     { name: "Product", value: product },
-                                    { name: "Key", value: key.key }
+                                    { name: "Key", value: key.key },
+                                    { name: "Type", value: type }
                                 )
                         ]
                     });

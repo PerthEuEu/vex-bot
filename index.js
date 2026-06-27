@@ -2,6 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const app = express();
 
+// ================= EXPRESS =================
 app.get("/", (req, res) => res.send("VEX BOT ONLINE"));
 
 app.listen(process.env.PORT || 10000, () => {
@@ -26,11 +27,12 @@ const {
 
 const db = require("./database/database");
 
+// ================= CLIENT =================
 const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-// ================= LOG CHANNEL =================
+// ================= ENV =================
 const SELL_LOG = process.env.SELL_LOG_CHANNEL_ID;
 const STOCK_LOG = process.env.STOCK_LOG_CHANNEL_ID;
 
@@ -81,16 +83,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const menu = new StringSelectMenuBuilder()
                 .setCustomId("stock_select")
                 .setPlaceholder("เลือกสินค้า")
-                .addOptions([
-                    ...products.slice(0, 24).map(p => ({
+                .addOptions(
+                    products.slice(0, 25).map(p => ({
                         label: p.name,
                         value: p.name
-                    })),
-                    {
-                        label: "➕ เพิ่มสินค้าใหม่",
-                        value: "new_product"
-                    }
-                ]);
+                    }))
+                );
 
             return interaction.reply({
                 content: "📦 เลือกสินค้า",
@@ -99,48 +97,22 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
-        // ================= SELECT STOCK =================
+        // ================= STOCK SELECT =================
         if (interaction.isStringSelectMenu() && interaction.customId === "stock_select") {
 
             const product = interaction.values[0];
-
-            if (product === "new_product") {
-
-                const modal = new ModalBuilder()
-                    .setCustomId("add_product")
-                    .setTitle("เพิ่มสินค้า");
-
-                modal.addComponents(
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder().setCustomId("name").setLabel("ชื่อ").setStyle(TextInputStyle.Short).setRequired(true)
-                    ),
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder().setCustomId("cost").setLabel("ทุน").setStyle(TextInputStyle.Short).setRequired(true)
-                    ),
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder().setCustomId("reseller").setLabel("Reseller").setStyle(TextInputStyle.Short).setRequired(true)
-                    ),
-                    new ActionRowBuilder().addComponents(
-                        new TextInputBuilder().setCustomId("customer").setLabel("Customer").setStyle(TextInputStyle.Short).setRequired(true)
-                    )
-                );
-
-                return interaction.showModal(modal);
-            }
 
             const modal = new ModalBuilder()
                 .setCustomId(`add_stock_${product}`)
                 .setTitle("เติมสต็อค");
 
-            modal.addComponents(
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder()
-                        .setCustomId("keys")
-                        .setLabel("1 บรรทัด = 1 key")
-                        .setStyle(TextInputStyle.Paragraph)
-                        .setRequired(true)
-                )
-            );
+            const keys = new TextInputBuilder()
+                .setCustomId("keys")
+                .setLabel("1 บรรทัด = 1 key")
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true);
+
+            modal.addComponents(new ActionRowBuilder().addComponents(keys));
 
             return interaction.showModal(modal);
         }
@@ -155,7 +127,9 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 .map(v => v.trim())
                 .filter(Boolean);
 
-            const added = await db.addKeys(product, keys);
+            keys = [...new Set(keys)];
+
+            await db.addKeys(product, keys);
             const stock = await db.getStock(product);
 
             const log = new EmbedBuilder()
@@ -175,7 +149,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
-        // ================= SELL =================
+        // ================= SELL BUTTON =================
         if (interaction.isButton() && interaction.customId === "sell") {
 
             const products = await db.getProducts();
@@ -183,10 +157,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const menu = new StringSelectMenuBuilder()
                 .setCustomId("sell_select")
                 .setPlaceholder("เลือกสินค้า")
-                .addOptions(products.slice(0, 24).map(p => ({
-                    label: p.name,
-                    value: p.name
-                })));
+                .addOptions(
+                    products.slice(0, 25).map(p => ({
+                        label: p.name,
+                        value: p.name
+                    }))
+                );
 
             return interaction.reply({
                 content: "📦 เลือกสินค้า",
@@ -195,7 +171,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
-        // ================= SELL PRODUCT =================
+        // ================= SELL SELECT =================
         if (interaction.isStringSelectMenu() && interaction.customId === "sell_select") {
 
             const product = interaction.values[0];
@@ -225,15 +201,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const key = await db.getRandomKey(product);
             const stock = await db.getStock(product);
 
-            if (!key) {
-                return interaction.reply({
-                    content: "❌ Out of stock",
-                    flags: MessageFlags.Ephemeral
-                });
+            if (!p) {
+                return interaction.reply({ content: "❌ no product", flags: MessageFlags.Ephemeral });
             }
 
-            const price = type === "reseller" ? p.reseller_price : p.customer_price;
-            const profit = price - p.cost;
+            if (!key) {
+                return interaction.reply({ content: "❌ out of stock", flags: MessageFlags.Ephemeral });
+            }
+
+            const cost = Number(p.cost || 0);
+            const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
+            const profit = price - cost;
+
+            const embed = new EmbedBuilder()
+                .setTitle("🔑 CONFIRM SELL")
+                .addFields(
+                    { name: "Product", value: product },
+                    { name: "Type", value: type },
+                    { name: "Price", value: `${price}` },
+                    { name: "Cost", value: `${cost}` },
+                    { name: "Profit", value: `${profit}` },
+                    { name: "Stock", value: `${stock.count}` }
+                )
+                .setColor("Blue");
 
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
@@ -241,17 +231,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     .setLabel("CONFIRM SELL")
                     .setStyle(ButtonStyle.Success)
             );
-
-            const embed = new EmbedBuilder()
-                .setTitle("CONFIRM SELL")
-                .addFields(
-                    { name: "Product", value: product },
-                    { name: "Type", value: type },
-                    { name: "Price", value: `${price}` },
-                    { name: "Profit", value: `${profit}` },
-                    { name: "Stock", value: `${stock.count}` }
-                )
-                .setColor("Blue");
 
             return interaction.reply({
                 embeds: [embed],
@@ -267,20 +246,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             const p = await db.getProduct(product);
             const key = await db.getRandomKey(product);
-            const stock = await db.getStock(product);
 
-            if (!key) {
-                return interaction.reply({
-                    content: "❌ Out of stock",
-                    flags: MessageFlags.Ephemeral
-                });
+            if (!p || !key) {
+                return interaction.reply({ content: "❌ error", flags: MessageFlags.Ephemeral });
             }
 
-            const price = type === "reseller" ? p.reseller_price : p.customer_price;
-            const profit = price - p.cost;
+            const cost = Number(p.cost || 0);
+            const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
+            const profit = price - cost;
 
-            // 🔥 IMPORTANT: mark key used
+            // 🔥 IMPORTANT: mark key used (FIX STOCK BUG)
             await db.useKey(key.id);
+
+            const stock = await db.getStock(product);
 
             const log = new EmbedBuilder()
                 .setTitle("🔑 SELL LOG")
@@ -290,7 +268,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                     { name: "Key", value: key.key },
                     { name: "Type", value: type },
                     { name: "Profit", value: `${profit}` },
-                    { name: "Stock Left", value: `${stock.count - 1}` }
+                    { name: "Stock Left", value: `${stock.count}` }
                 )
                 .setColor("Red");
 
@@ -303,7 +281,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
     } catch (err) {
-        console.log("ERROR:", err);
+        console.log("❌ ERROR:", err);
 
         if (!interaction.replied) {
             return interaction.reply({

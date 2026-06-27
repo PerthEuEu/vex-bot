@@ -36,12 +36,7 @@ async function addProduct(name, cost = 0, resell_price = 0, customer_price = 0) 
 
     const { data, error } = await supabase
         .from("products")
-        .insert([{
-            name,
-            cost,
-            resell_price,
-            customer_price
-        }])
+        .insert([{ name, cost, resell_price, customer_price }])
         .select()
         .single();
 
@@ -109,7 +104,9 @@ async function getStock(productName) {
     return { count: count || 0 };
 }
 
-// 🔥 IMPORTANT: ดึงเฉพาะ available
+// =====================
+// GET RANDOM KEY (AVAILABLE ONLY)
+// =====================
 async function getRandomKey(productName) {
 
     const { data, error } = await supabase
@@ -125,7 +122,9 @@ async function getRandomKey(productName) {
     return data[Math.floor(Math.random() * data.length)];
 }
 
-// 🔥 IMPORTANT FIX: MARK KEY USED (ตัวที่คุณขาด)
+// =====================
+// 🔥 FIX: MARK KEY USED (IMPORTANT)
+// =====================
 async function markKeyUsed(keyId) {
 
     const { error } = await supabase
@@ -160,6 +159,9 @@ async function lockKey(payload) {
     return data || null;
 }
 
+// =====================
+// CONFIRM KEY (FIX STOCK BUG HERE)
+// =====================
 async function confirmKey(id) {
 
     const { data: item, error } = await supabase
@@ -172,7 +174,7 @@ async function confirmKey(id) {
 
     if (!item || item.status !== "pending") return item;
 
-    // 🔥 FIX สำคัญ: ต้อง mark used
+    // 🔥 IMPORTANT FIX: mark key used here
     await markKeyUsed(item.key_id);
 
     await supabase
@@ -183,6 +185,9 @@ async function confirmKey(id) {
     return item;
 }
 
+// =====================
+// CANCEL KEY
+// =====================
 async function cancelKey(id) {
 
     const { data: item, error } = await supabase

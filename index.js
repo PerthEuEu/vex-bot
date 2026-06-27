@@ -38,8 +38,7 @@ function sendLog(channelId, embed) {
     if (!channelId) return;
     const ch = client.channels.cache.get(channelId);
     if (!ch) return;
-
-    ch.send({ embeds: [embed] }).catch(console.error);
+    ch.send({ embeds: [embed] }).catch(() => {});
 }
 
 // ================= READY =================
@@ -80,20 +79,16 @@ try {
     if (interaction.isButton() && interaction.customId === "stock_open") {
 
         const products = await db.getProducts();
-
-        if (!products || products.length === 0) {
+        if (!products?.length)
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
-        }
 
         const menu = new StringSelectMenuBuilder()
             .setCustomId("stock_select")
             .setPlaceholder("เลือกสินค้า")
-            .addOptions(
-                products.slice(0, 25).map(p => ({
-                    label: p.name,
-                    value: p.name
-                }))
-            );
+            .addOptions(products.slice(0, 25).map(p => ({
+                label: p.name,
+                value: p.name
+            })));
 
         return interaction.reply({
             content: "📦 เลือกสินค้า",
@@ -134,23 +129,22 @@ try {
             .map(x => x.trim())
             .filter(Boolean);
 
-        if (keys.length === 0) {
+        if (!keys.length)
             return interaction.reply({ content: "❌ ไม่มี key", ephemeral: true });
-        }
 
         const inserted = await db.addKeys(product, keys);
         const stock = await db.getStock(product);
 
-        sendLog(STOCK_LOG,
-            new EmbedBuilder()
-                .setTitle("📥 STOCK IN")
-                .addFields(
-                    { name: "Product", value: product },
-                    { name: "Added", value: String(inserted.length) },
-                    { name: "Stock Left", value: String(stock) }
-                )
-                .setColor("Green")
-        );
+        const embed = new EmbedBuilder()
+            .setTitle("📥 STOCK IN")
+            .addFields(
+                { name: "Product", value: product },
+                { name: "Added", value: String(inserted.length) },
+                { name: "Stock Left", value: String(stock) }
+            )
+            .setColor("Green");
+
+        sendLog(STOCK_LOG, embed);
 
         return interaction.reply({
             content: `✅ เพิ่ม ${inserted.length} keys`,
@@ -162,20 +156,16 @@ try {
     if (interaction.isButton() && interaction.customId === "sell_open") {
 
         const products = await db.getProducts();
-
-        if (!products || products.length === 0) {
+        if (!products?.length)
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
-        }
 
         const menu = new StringSelectMenuBuilder()
             .setCustomId("sell_select")
             .setPlaceholder("เลือกสินค้า")
-            .addOptions(
-                products.slice(0, 25).map(p => ({
-                    label: p.name,
-                    value: p.name
-                }))
-            );
+            .addOptions(products.slice(0, 25).map(p => ({
+                label: p.name,
+                value: p.name
+            })));
 
         return interaction.reply({
             content: "📦 เลือกสินค้า",
@@ -204,22 +194,22 @@ try {
         });
     }
 
-    // ================= SELL TYPE =================
+    // ================= SELL TYPE (FIXED CORE BUG) =================
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("sell_type_")) {
 
         const product = interaction.customId.replace("sell_type_", "");
         const type = interaction.values[0];
 
         const p = await db.getProduct(product);
+
+        // 🔥 FIX: atomic claim (กัน out of stock หลอก)
         const key = await db.claimKey(product);
 
-        if (!p) {
+        if (!p)
             return interaction.reply({ content: "❌ no product", ephemeral: true });
-        }
 
-        if (!key) {
+        if (!key)
             return interaction.reply({ content: "❌ out of stock", ephemeral: true });
-        }
 
         const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
         const cost = Number(p.cost || 0);
@@ -231,7 +221,7 @@ try {
                 .setTitle("🔑 SELL OUT")
                 .addFields(
                     { name: "Product", value: product },
-                    { name: "Key", value: key.key },
+                    { name: "Key", value: key.keys }, // ✅ FIX COLUMN
                     { name: "Buyer", value: `<@${interaction.user.id}>` },
                     { name: "Type", value: type },
                     { name: "Price", value: String(price) },
@@ -242,7 +232,7 @@ try {
         );
 
         return interaction.reply({
-            content: `🔑 KEY: ${key.key}`,
+            content: `🔑 KEY: ${key.keys}`,
             ephemeral: true
         });
     }

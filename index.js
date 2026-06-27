@@ -41,18 +41,19 @@ function sendLog(channelId, embed) {
 
 // ================= READY =================
 client.once(Events.ClientReady, () => {
-    console.log(`✅ BOT ONLINE: ${client.user.tag}`);
+    console.log(`✅ ONLINE: ${client.user.tag}`);
 });
 
-// ================= MAIN =================
+// ================= INTERACTIONS =================
 client.on(Events.InteractionCreate, async (interaction) => {
 try {
 
     // ================= PANEL =================
     if (interaction.isChatInputCommand() && interaction.commandName === "panel") {
 
-        return interaction.reply({
-            ephemeral: true,
+        await interaction.deferReply({ ephemeral: true });
+
+        return interaction.editReply({
             embeds: [
                 new EmbedBuilder().setTitle("📦 VEX PANEL")
             ],
@@ -76,7 +77,7 @@ try {
     if (interaction.isButton() && interaction.customId === "stock_open") {
 
         const products = await db.getProducts();
-        if (!products.length)
+        if (!products?.length)
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
 
         const menu = new StringSelectMenuBuilder()
@@ -129,23 +130,22 @@ try {
         if (!keys.length)
             return interaction.reply({ content: "❌ ไม่มี key", ephemeral: true });
 
-        await db.addKeys(product, keys);
-
+        const inserted = await db.addKeys(product, keys);
         const stock = await db.getStock(product);
 
         const embed = new EmbedBuilder()
             .setTitle("📥 STOCK ADDED")
             .addFields(
                 { name: "Product", value: product },
-                { name: "Amount", value: String(keys.length) },
-                { name: "Stock", value: String(stock) }
+                { name: "Added", value: String(inserted.length) },
+                { name: "Stock Left", value: String(stock.count) }
             )
             .setColor("Green");
 
         sendLog(STOCK_LOG, embed);
 
         return interaction.reply({
-            content: `✅ เพิ่ม ${keys.length} keys`,
+            content: `✅ เพิ่ม ${inserted.length} keys`,
             ephemeral: true
         });
     }
@@ -154,7 +154,7 @@ try {
     if (interaction.isButton() && interaction.customId === "sell_open") {
 
         const products = await db.getProducts();
-        if (!products.length)
+        if (!products?.length)
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
 
         const menu = new StringSelectMenuBuilder()
@@ -200,28 +200,21 @@ try {
 
         const p = await db.getProduct(product);
 
-        // 🔥 FIX: ใช้ claimKey กันคีย์ซ้ำ
+        // 🔥 IMPORTANT: atomic claim กันคีย์ซ้ำ
         const key = await db.claimKey(product);
 
-        if (!p) return interaction.reply({ content: "❌ no product", ephemeral: true });
-        if (!key) return interaction.reply({ content: "❌ out of stock", ephemeral: true });
+        if (!p)
+            return interaction.reply({ content: "❌ no product", ephemeral: true });
+
+        if (!key)
+            return interaction.reply({ content: "❌ out of stock", ephemeral: true });
 
         const price = type === "reseller" ? p.resell_price : p.customer_price;
 
-        const embed = new EmbedBuilder()
-            .setTitle("CONFIRM SELL")
-            .addFields(
-                { name: "Product", value: product },
-                { name: "Type", value: type },
-                { name: "Key", value: key.key }
-            )
-            .setColor("Blue");
-
-        await db.useKey(key.id);
-
+        // log sell
         sendLog(SELL_LOG,
             new EmbedBuilder()
-                .setTitle("🔑 SELL LOG")
+                .setTitle("🔑 SELL")
                 .addFields(
                     { name: "Product", value: product },
                     { name: "Key", value: key.key },
@@ -238,7 +231,8 @@ try {
 
 } catch (err) {
     console.log("ERROR:", err);
-    if (!interaction.replied) {
+
+    if (!interaction.replied && !interaction.deferred) {
         return interaction.reply({ content: "❌ error", ephemeral: true });
     }
 }

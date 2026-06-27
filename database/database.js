@@ -5,9 +5,12 @@ const supabase = createClient(
     process.env.SUPABASE_KEY
 );
 
-// ================= CLEAN =================
+// ================= CLEAN (IMPORTANT FIX) =================
 function norm(str) {
-    return (str || "").trim();
+    return (str || "")
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, " ");
 }
 
 // ================= PRODUCTS =================
@@ -16,19 +19,20 @@ async function getProducts() {
         .from("products")
         .select("*");
 
-    if (error) console.log(error);
+    if (error) console.log("getProducts:", error);
     return data || [];
 }
 
 async function getProduct(name) {
     const clean = norm(name);
 
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from("products")
         .select("*")
         .eq("name", clean)
         .maybeSingle();
 
+    if (error) console.log(error);
     return data || null;
 }
 
@@ -71,32 +75,46 @@ async function getStock(product_name) {
     return count || 0;
 }
 
-// ================= CLAIM KEY (FIXED REAL ATOMIC) =================
+// ================= 🔥 FIXED CLAIM KEY (REAL SAFE VERSION) =================
 async function claimKey(product_name) {
 
     const clean = norm(product_name);
 
-    // 🔥 STEP 1: lock 1 key
+    // 🔥 STEP 1: get 1 available key (ORDER FIXED)
     const { data, error } = await supabase
         .from("keys")
         .select("id, key")
         .eq("product_name", clean)
         .eq("status", "available")
+        .order("id", { ascending: true })
         .limit(1);
 
-    if (error || !data?.length) return null;
+    if (error) {
+        console.log("select error:", error);
+        return null;
+    }
+
+    if (!data || data.length === 0) return null;
 
     const key = data[0];
 
-    // 🔥 STEP 2: update with condition
+    // 🔥 STEP 2: atomic update (IMPORTANT FIX)
     const { data: updated, error: upErr } = await supabase
         .from("keys")
-        .update({ status: "used", used_at: new Date().toISOString() })
+        .update({
+            status: "used",
+            used_at: new Date().toISOString()
+        })
         .eq("id", key.id)
-        .eq("status", "available")
-        .select();
+        .eq("status", "available") // กันชนกันหลายคน
+        .select("id");
 
-    if (upErr || !updated?.length) return null;
+    if (upErr) {
+        console.log("update error:", upErr);
+        return null;
+    }
+
+    if (!updated || updated.length === 0) return null;
 
     return key;
 }

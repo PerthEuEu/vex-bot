@@ -45,11 +45,6 @@ client.once(Events.ClientReady, () => {
     console.log(`✅ ONLINE: ${client.user.tag}`);
 });
 
-// ================= NORMALIZE FIX =================
-function norm(str) {
-    return (str || "").trim();
-}
-
 // ================= INTERACTIONS =================
 client.on(Events.InteractionCreate, async (interaction) => {
 try {
@@ -83,7 +78,6 @@ try {
     if (interaction.isButton() && interaction.customId === "stock_open") {
 
         const products = await db.getProducts();
-
         if (!products?.length)
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
 
@@ -93,7 +87,7 @@ try {
             .addOptions(
                 products.slice(0, 25).map(p => ({
                     label: p.name,
-                    value: norm(p.name) // 🔥 FIX สำคัญ
+                    value: p.name   // 🔥 FIX: ใช้ชื่อจริง
                 }))
             );
 
@@ -136,9 +130,6 @@ try {
             .map(x => x.trim())
             .filter(Boolean);
 
-        if (!keys.length)
-            return interaction.reply({ content: "❌ ไม่มี key", ephemeral: true });
-
         const inserted = await db.addKeys(product, keys);
         const stock = await db.getStock(product);
 
@@ -163,7 +154,6 @@ try {
     if (interaction.isButton() && interaction.customId === "sell_open") {
 
         const products = await db.getProducts();
-
         if (!products?.length)
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
 
@@ -173,7 +163,7 @@ try {
             .addOptions(
                 products.slice(0, 25).map(p => ({
                     label: p.name,
-                    value: norm(p.name) // 🔥 FIX
+                    value: p.name   // 🔥 FIX: ห้าม norm
                 }))
             );
 
@@ -215,7 +205,7 @@ try {
         if (!p)
             return interaction.reply({ content: "❌ no product", ephemeral: true });
 
-        // 🔥 CLAIM KEY (REAL FIX)
+        // 🔥 CLAIM KEY FIXED
         const key = await db.claimKey(product);
 
         if (!key)

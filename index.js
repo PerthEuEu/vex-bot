@@ -29,16 +29,15 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-// ================= LOG CHANNEL =================
+// ================= LOG =================
 const SELL_LOG = process.env.SELL_LOG_CHANNEL_ID;
 const STOCK_LOG = process.env.STOCK_LOG_CHANNEL_ID;
 
-// ================= SAFE LOG =================
 function sendLog(channelId, embed) {
     if (!channelId) return;
     const ch = client.channels.cache.get(channelId);
     if (!ch) return;
-    ch.send({ embeds: [embed] }).catch(() => {});
+    ch.send({ embeds: [embed] }).catch(console.error);
 }
 
 // ================= READY =================
@@ -79,7 +78,8 @@ try {
     if (interaction.isButton() && interaction.customId === "stock_open") {
 
         const products = await db.getProducts();
-        if (!products?.length)
+
+        if (!products || products.length === 0)
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
 
         const menu = new StringSelectMenuBuilder()
@@ -135,16 +135,16 @@ try {
         const inserted = await db.addKeys(product, keys);
         const stock = await db.getStock(product);
 
-        const embed = new EmbedBuilder()
-            .setTitle("📥 STOCK IN")
-            .addFields(
-                { name: "Product", value: product },
-                { name: "Added", value: String(inserted.length) },
-                { name: "Stock Left", value: String(stock) }
-            )
-            .setColor("Green");
-
-        sendLog(STOCK_LOG, embed);
+        sendLog(STOCK_LOG,
+            new EmbedBuilder()
+                .setTitle("📥 STOCK IN")
+                .addFields(
+                    { name: "Product", value: product },
+                    { name: "Added", value: String(inserted.length) },
+                    { name: "Stock Left", value: String(stock) }
+                )
+                .setColor("Green")
+        );
 
         return interaction.reply({
             content: `✅ เพิ่ม ${inserted.length} keys`,
@@ -156,7 +156,8 @@ try {
     if (interaction.isButton() && interaction.customId === "sell_open") {
 
         const products = await db.getProducts();
-        if (!products?.length)
+
+        if (!products || products.length === 0)
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
 
         const menu = new StringSelectMenuBuilder()
@@ -194,7 +195,7 @@ try {
         });
     }
 
-    // ================= SELL TYPE (FIXED CORE BUG) =================
+    // ================= SELL TYPE (FIXED FINAL) =================
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("sell_type_")) {
 
         const product = interaction.customId.replace("sell_type_", "");
@@ -202,11 +203,11 @@ try {
 
         const p = await db.getProduct(product);
 
-        // 🔥 FIX: atomic claim (กัน out of stock หลอก)
-        const key = await db.claimKey(product);
-
         if (!p)
             return interaction.reply({ content: "❌ no product", ephemeral: true });
+
+        // 🔥 atomic claim key
+        const key = await db.claimKey(product);
 
         if (!key)
             return interaction.reply({ content: "❌ out of stock", ephemeral: true });
@@ -215,13 +216,12 @@ try {
         const cost = Number(p.cost || 0);
         const profit = price - cost;
 
-        // ================= SELL LOG =================
         sendLog(SELL_LOG,
             new EmbedBuilder()
                 .setTitle("🔑 SELL OUT")
                 .addFields(
                     { name: "Product", value: product },
-                    { name: "Key", value: key.keys }, // ✅ FIX COLUMN
+                    { name: "Key", value: key.key },   // ✅ FIX
                     { name: "Buyer", value: `<@${interaction.user.id}>` },
                     { name: "Type", value: type },
                     { name: "Price", value: String(price) },
@@ -232,7 +232,7 @@ try {
         );
 
         return interaction.reply({
-            content: `🔑 KEY: ${key.keys}`,
+            content: `🔑 KEY: ${key.key}`,   // ✅ FIX
             ephemeral: true
         });
     }

@@ -19,26 +19,25 @@ async function safeReply(interaction, payload) {
 module.exports = async (interaction) => {
     try {
 
+        // ================= GET PRODUCTS =================
         const products = await db.getProducts();
 
-        // ================= NO PRODUCT =================
-        if (!products || products.length === 0) {
+        if (!Array.isArray(products) || products.length === 0) {
             return safeReply(interaction, {
                 content: "❌ ยังไม่มีสินค้าในระบบ",
                 ephemeral: true
             });
         }
 
-        // ================= LIMIT SAFE =================
+        // ================= BUILD MENU =================
         const safeProducts = products.slice(0, 25);
 
-        // ================= MENU =================
         const menu = new StringSelectMenuBuilder()
-            .setCustomId("stock_select_product") // 🔥 สำคัญ: แยกจาก sell
+            .setCustomId("stock_select_product")
             .setPlaceholder("📦 เลือกสินค้าที่ต้องการเติมสต็อก")
             .addOptions(
                 safeProducts.map(p => ({
-                    label: p.name?.slice(0, 100) || "unknown",
+                    label: (p.name || "unknown").slice(0, 100),
                     value: p.name
                 }))
             );
@@ -56,7 +55,7 @@ module.exports = async (interaction) => {
         console.log("❌ addstock error:", err?.message || err);
 
         return safeReply(interaction, {
-            content: "❌ ระบบโหลดสินค้าไม่สำเร็จ",
+            content: "❌ โหลดสินค้าไม่สำเร็จ",
             ephemeral: true
         });
     }

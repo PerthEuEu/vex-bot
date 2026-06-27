@@ -18,11 +18,22 @@ function logError(action, error) {
     console.log(error.message || error);
 }
 
+// ================= CATEGORY =================
+async function getCategories() {
+    const { data, error } = await supabase
+        .from("categories")
+        .select("*")
+        .order("name", { ascending: true });
+
+    logError("getCategories", error);
+    return Array.isArray(data) ? data : [];
+}
+
 // ================= PRODUCTS =================
-async function addProduct(name, cost = 0, resell_price = 0, customer_price = 0) {
+async function addProduct(name, category = "default", cost = 0, resell_price = 0, customer_price = 0) {
     const { data, error } = await supabase
         .from("products")
-        .insert([{ name, cost, resell_price, customer_price }])
+        .insert([{ name, category, cost, resell_price, customer_price }])
         .select()
         .single();
 
@@ -48,6 +59,18 @@ async function getProducts() {
         .order("name", { ascending: true });
 
     logError("getProducts", error);
+    return Array.isArray(data) ? data : [];
+}
+
+// ================= FILTER BY CATEGORY =================
+async function getProductsByCategory(category) {
+    const { data, error } = await supabase
+        .from("products")
+        .select("*")
+        .eq("category", category)
+        .order("name", { ascending: true });
+
+    logError("getProductsByCategory", error);
     return Array.isArray(data) ? data : [];
 }
 
@@ -88,13 +111,13 @@ async function getStock(product_name) {
     return Number(count || 0);
 }
 
-// ================= 🔥 FIXED ATOMIC CLAIM KEY (REAL SAFE) =================
+// ================= 🔥 SAFE ATOMIC CLAIM KEY =================
 async function claimKey(product_name) {
 
-    // 🔥 STEP 1: get 1 key
+    // 1️⃣ select key
     const { data, error } = await supabase
         .from("keys")
-        .select("id, key, product_name")
+        .select("id, key")
         .eq("product_name", product_name)
         .eq("status", "available")
         .limit(1)
@@ -105,7 +128,7 @@ async function claimKey(product_name) {
         return null;
     }
 
-    // 🔥 STEP 2: atomic lock (IMPORTANT FIX)
+    // 2️⃣ atomic lock (กันแย่ง 100%)
     const { data: locked, error: lockErr } = await supabase
         .from("keys")
         .update({
@@ -113,7 +136,7 @@ async function claimKey(product_name) {
             used_at: new Date().toISOString()
         })
         .eq("id", data.id)
-        .eq("status", "available") // กันคนแย่ง
+        .eq("status", "available")
         .select()
         .maybeSingle();
 
@@ -122,7 +145,6 @@ async function claimKey(product_name) {
         return null;
     }
 
-    // ❌ ถ้าโดนแย่ง = null
     if (!locked) return null;
 
     return locked;
@@ -130,9 +152,17 @@ async function claimKey(product_name) {
 
 module.exports = {
     supabase,
+
+    // category
+    getCategories,
+
+    // product
     addProduct,
     getProduct,
     getProducts,
+    getProductsByCategory,
+
+    // stock
     addKeys,
     getStock,
     claimKey

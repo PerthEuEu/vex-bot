@@ -1,7 +1,6 @@
 require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 
-// ================= ENV CHECK =================
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
     console.log("❌ Supabase env missing!");
     process.exit(1);
@@ -25,7 +24,7 @@ async function addProduct(name, cost = 0, resell_price = 0, customer_price = 0) 
         .from("products")
         .insert([{ name, cost, resell_price, customer_price }])
         .select()
-        .single();
+        .maybeSingle();
 
     logError("addProduct", error);
     return data || null;
@@ -36,7 +35,7 @@ async function getProduct(name) {
         .from("products")
         .select("*")
         .eq("name", name)
-        .maybeSingle(); // 🔥 FIX กัน crash
+        .maybeSingle();
 
     logError("getProduct", error);
     return data || null;
@@ -52,7 +51,7 @@ async function getProducts() {
     return Array.isArray(data) ? data : [];
 }
 
-// ================= KEYS =================
+// ================= ADD KEYS =================
 async function addKeys(product_name, keysArray = []) {
 
     const rows = keysArray
@@ -64,7 +63,7 @@ async function addKeys(product_name, keysArray = []) {
             status: "available"
         }));
 
-    if (rows.length === 0) return [];
+    if (!rows.length) return [];
 
     const { data, error } = await supabase
         .from("keys")
@@ -75,7 +74,7 @@ async function addKeys(product_name, keysArray = []) {
     return data || [];
 }
 
-// ================= STOCK (FIXED SAFE) =================
+// ================= STOCK =================
 async function getStock(product_name) {
 
     const { count, error } = await supabase
@@ -86,46 +85,41 @@ async function getStock(product_name) {
 
     logError("getStock", error);
 
-    return {
-        count: Number(count || 0)
-    }; // 🔥 FIX ไม่ให้ undefined
+    return { count: Number(count || 0) };
 }
 
-// ================= RANDOM KEY =================
-async function getRandomKey(product_name) {
+// ================= 🔥 FIX CORE (LOCK KEY INSTANT) =================
+async function claimKey(product_name) {
 
+    // 👉 สำคัญ: ไม่ random ก่อน
     const { data, error } = await supabase
         .from("keys")
         .select("*")
         .eq("product_name", product_name)
-        .eq("status", "available");
+        .eq("status", "available")
+        .limit(1);
 
-    logError("getRandomKey", error);
+    logError("claimKey-select", error);
 
-    if (!Array.isArray(data) || data.length === 0) return null;
+    if (!data || data.length === 0) return null;
 
-    return data[Math.floor(Math.random() * data.length)];
-}
+    const key = data[0];
 
-// ================= USE KEY (ANTI DOUBLE CLICK FIX) =================
-async function useKey(keyId) {
-
-    if (!keyId) return null;
-
-    const { data, error } = await supabase
+    // 🔥 atomic lock
+    const { data: locked, error: lockErr } = await supabase
         .from("keys")
         .update({
             status: "used",
             used_at: new Date().toISOString()
         })
-        .eq("id", keyId)
-        .eq("status", "available") // 🔥 กันยิงซ้ำ
+        .eq("id", key.id)
+        .eq("status", "available")
         .select()
-        .maybeSingle(); // 🔥 FIX กัน crash
+        .maybeSingle();
 
-    logError("useKey", error);
+    logError("claimKey-lock", lockErr);
 
-    return data || null;
+    return locked || null;
 }
 
 // ================= EXPORT =================
@@ -136,6 +130,5 @@ module.exports = {
     getProducts,
     addKeys,
     getStock,
-    getRandomKey,
-    useKey
+    claimKey
 };

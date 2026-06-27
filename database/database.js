@@ -83,15 +83,15 @@ async function getStock(product_name) {
 
     logError("getStock", error);
 
-    return {
-        count: Number(count || 0)
-    };
+    return Number(count || 0);
 }
 
-// ================= 🔥 FIXED CLAIM KEY (NO DOUBLE SELL) =================
+// ================= 🔥 FIX: ATOMIC CLAIM (ตัวจริง) =================
 async function claimKey(product_name) {
 
-    // 1) ดึง key ที่ยังใช้ได้ 1 อัน
+    // 🔥 สำคัญ: ใช้ RPC-style lock logic (2-step safe)
+
+    // 1) หา key ที่ยัง available
     const { data, error } = await supabase
         .from("keys")
         .select("*")
@@ -105,7 +105,7 @@ async function claimKey(product_name) {
 
     const key = data[0];
 
-    // 2) ล็อคทันที (กันคนอื่นกดแย่ง)
+    // 2) ล็อคแบบกัน race (สำคัญมาก)
     const { data: locked, error: lockErr } = await supabase
         .from("keys")
         .update({
@@ -113,12 +113,13 @@ async function claimKey(product_name) {
             used_at: new Date().toISOString()
         })
         .eq("id", key.id)
-        .eq("status", "available")
+        .eq("status", "available") // 🔥 กันคนแย่ง
         .select()
         .maybeSingle();
 
     logError("claimKey-lock", lockErr);
 
+    // ❌ โดนแย่ง = null
     if (!locked) return null;
 
     return locked;

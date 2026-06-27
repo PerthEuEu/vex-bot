@@ -26,20 +26,16 @@ const client = new Client({
 const SELL_LOG = process.env.SELL_LOG_CHANNEL_ID;
 
 const usedConfirm = new Set();
-
-// ================= MEMORY RESERVE =================
-const reserve = new Map(); 
-// key: userId -> { product, type, key }
+const reserve = new Map();
 
 client.once(Events.ClientReady, () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
 });
 
-// ================= PANEL =================
 client.on(Events.InteractionCreate, async (interaction) => {
 try {
 
-    // PANEL
+    // ================= PANEL =================
     if (interaction.isChatInputCommand() && interaction.commandName === "panel") {
         return interaction.reply({
             embeds: [new EmbedBuilder().setTitle("📦 STOCK PANEL")],
@@ -58,7 +54,7 @@ try {
         });
     }
 
-    // ADD STOCK
+    // ================= ADD STOCK =================
     if (interaction.isButton() && interaction.customId === "addstock") {
         const products = await db.getProducts();
         if (!products.length)
@@ -78,7 +74,7 @@ try {
         });
     }
 
-    // SELL
+    // ================= SELL =================
     if (interaction.isButton() && interaction.customId === "sell") {
         const products = await db.getProducts();
         if (!products.length)
@@ -98,11 +94,12 @@ try {
         });
     }
 
-    // SELL SELECT
+    // ================= SELL SELECT =================
     if (interaction.isStringSelectMenu() && interaction.customId === "sell_select") {
+
         const product = interaction.values[0];
 
-        const menu = new StringSelectMenuBuilder()
+        const typeMenu = new StringSelectMenuBuilder()
             .setCustomId(`sell_type_${product}`)
             .addOptions([
                 { label: "Reseller", value: "reseller" },
@@ -111,12 +108,12 @@ try {
 
         return interaction.reply({
             content: "💰 เลือกประเภท",
-            components: [new ActionRowBuilder().addComponents(menu)],
+            components: [new ActionRowBuilder().addComponents(typeMenu)],
             ephemeral: true
         });
     }
 
-    // ================= SELL TYPE (RESERVE KEY HERE) =================
+    // ================= SELL TYPE =================
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("sell_type_")) {
 
         const product = interaction.customId.replace("sell_type_", "");
@@ -125,11 +122,13 @@ try {
         const p = await db.getProduct(product);
         if (!p) return interaction.reply({ content: "❌ no product", ephemeral: true });
 
-        const key = await db.claimKey(product); // 🔥 สำคัญ: จองทันที
+        const stock = await db.getStock(product);
+        if (stock.count <= 0) {
+            return interaction.reply({ content: "❌ คีย์หมด", ephemeral: true });
+        }
 
-        if (!key) return interaction.reply({ content: "❌ คีย์หมด", ephemeral: true });
-
-        reserve.set(interaction.user.id, { product, type, key });
+        // reserve product only (NOT key yet)
+        reserve.set(interaction.user.id, { product, type });
 
         const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
         const cost = Number(p.cost || 0);
@@ -143,7 +142,8 @@ try {
                         { name: "Type", value: type },
                         { name: "Cost", value: `${cost}` },
                         { name: "Price", value: `${price}` },
-                        { name: "Profit", value: `${price - cost}` }
+                        { name: "Profit", value: `${price - cost}` },
+                        { name: "Stock", value: `${stock.count}` }
                     )
             ],
             components: [
@@ -158,22 +158,33 @@ try {
         });
     }
 
-    // ================= CONFIRM =================
+    // ================= CONFIRM (FINAL FIX) =================
     if (interaction.isButton() && interaction.customId === "confirm_sell") {
 
-        if (usedConfirm.has(interaction.user.id))
+        if (usedConfirm.has(interaction.user.id)) {
             return interaction.reply({ content: "❌ กำลังทำรายการ", ephemeral: true });
+        }
 
         const data = reserve.get(interaction.user.id);
 
-        if (!data)
-            return interaction.reply({ content: "❌ ไม่มีข้อมูล", ephemeral: true });
+        if (!data) {
+            return interaction.reply({ content: "❌ session หมด", ephemeral: true });
+        }
 
         usedConfirm.add(interaction.user.id);
 
         try {
-            const { product, type, key } = data;
+            const { product, type } = data;
 
+            // 🔥 LOCK KEY ตอน confirm เท่านั้น
+            const key = await db.claimKey(product);
+
+            if (!key) {
+                reserve.delete(interaction.user.id);
+                return interaction.reply({ content: "❌ คีย์หมด", ephemeral: true });
+            }
+
+            const p = await db.getProduct(product);
             const stock = await db.getStock(product);
 
             if (SELL_LOG) {
@@ -205,7 +216,7 @@ try {
     }
 
 } catch (err) {
-    console.log(err);
+    console.log("GLOBAL ERROR:", err);
 }
 });
 

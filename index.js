@@ -2,8 +2,8 @@ require("dotenv").config();
 const express = require("express");
 const app = express();
 
+// ================= EXPRESS =================
 app.get("/", (req, res) => res.send("VEX BOT ONLINE"));
-
 app.listen(process.env.PORT || 10000, () => {
     console.log("🌐 Express running");
 });
@@ -37,14 +37,17 @@ const STOCK_LOG = process.env.STOCK_LOG_CHANNEL_ID;
 // ================= READY =================
 client.once(Events.ClientReady, () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
+    console.log("🔥 BOT READY");
 });
 
-// ================= SAFE REPLY =================
-async function safeReply(interaction, data) {
+// ================= SAFE REPLY (FIX 40060) =================
+async function safeReply(interaction, payload) {
     try {
         if (interaction.replied || interaction.deferred) return;
-        await interaction.reply(data);
-    } catch (e) {}
+        return await interaction.reply(payload);
+    } catch (err) {
+        console.log("safeReply error:", err.message);
+    }
 }
 
 // ================= MAIN =================
@@ -77,17 +80,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (interaction.isButton() && interaction.customId === "addstock") {
 
             const products = await db.getProducts();
-            if (!products.length) return safeReply(interaction, { content: "❌ no product", flags: MessageFlags.Ephemeral });
+            if (!products.length)
+                return safeReply(interaction, { content: "❌ no product", flags: MessageFlags.Ephemeral });
 
             const menu = new StringSelectMenuBuilder()
                 .setCustomId("stock_select")
                 .setPlaceholder("เลือกสินค้า")
-                .addOptions(
-                    products.map(p => ({
-                        label: p.name,
-                        value: p.name
-                    }))
-                );
+                .addOptions(products.map(p => ({
+                    label: p.name,
+                    value: p.name
+                })));
 
             return safeReply(interaction, {
                 content: "📦 เลือกสินค้า",
@@ -141,7 +143,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             if (STOCK_LOG) client.channels.cache.get(STOCK_LOG)?.send({ embeds: [log] });
 
-            return interaction.reply({ content: `✅ added ${keys.length}`, flags: MessageFlags.Ephemeral });
+            return interaction.reply({
+                content: `✅ added ${keys.length}`,
+                flags: MessageFlags.Ephemeral
+            });
         }
 
         // ================= SELL =================
@@ -194,10 +199,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const key = await db.getRandomKey(product);
             const stock = await db.getStock(product);
 
-            if (!p) return safeReply(interaction, { content: "no product", flags: MessageFlags.Ephemeral });
-            if (!key) return safeReply(interaction, { content: "out of stock", flags: MessageFlags.Ephemeral });
+            if (!p) return safeReply(interaction, { content: "❌ no product", flags: MessageFlags.Ephemeral });
+            if (!key) return safeReply(interaction, { content: "❌ out of stock", flags: MessageFlags.Ephemeral });
 
-            const cost = Number(p.cost);
+            const cost = Number(p.cost || 0);
             const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
             const profit = price - cost;
 
@@ -226,21 +231,29 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
-        // ================= CONFIRM =================
+        // ================= CONFIRM (🔥 FIX RACE + DOUBLE CLICK) =================
         if (interaction.isButton() && interaction.customId.startsWith("confirm_")) {
+
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
             const [, product, type] = interaction.customId.split("_");
 
             const p = await db.getProduct(product);
             const key = await db.getRandomKey(product);
 
-            if (!p || !key) return safeReply(interaction, { content: "error", flags: MessageFlags.Ephemeral });
+            if (!p || !key) {
+                return interaction.editReply("❌ error / no stock");
+            }
 
-            const cost = Number(p.cost);
+            // 🔥 IMPORTANT: lock key first (prevent duplicate sell)
+            const used = await db.useKey(key.id);
+            if (!used) {
+                return interaction.editReply("❌ key already used (try again)");
+            }
+
+            const cost = Number(p.cost || 0);
             const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
             const profit = price - cost;
-
-            await db.useKey(key.id);
 
             const stock = await db.getStock(product);
 
@@ -258,14 +271,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             if (SELL_LOG) client.channels.cache.get(SELL_LOG)?.send({ embeds: [log] });
 
-            return interaction.reply({
-                content: `KEY: ${key.key}`,
-                flags: MessageFlags.Ephemeral
-            });
+            return interaction.editReply(`🔑 KEY: ${key.key}`);
         }
 
     } catch (err) {
-        console.log(err);
+        console.log("❌ GLOBAL ERROR:", err);
     }
 });
 

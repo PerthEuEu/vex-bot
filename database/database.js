@@ -22,8 +22,9 @@ const supabase = createClient(
 // =====================
 function logError(action, error) {
     if (!error) return;
+
     console.log(`❌ Supabase Error [${action}]`);
-    console.log("Message:", error.message);
+    console.log("Message:", error.message || error);
     console.log("Code:", error.code || "unknown");
 }
 
@@ -34,7 +35,12 @@ async function addProduct(name, cost = 0, resell_price = 0, customer_price = 0) 
 
     const { data, error } = await supabase
         .from("products")
-        .insert([{ name, cost, resell_price, customer_price }])
+        .insert([{
+            name,
+            cost,
+            resell_price,
+            customer_price
+        }])
         .select()
         .single();
 
@@ -66,15 +72,15 @@ async function getProducts() {
 }
 
 // =====================
-// KEYS
+// KEYS INSERT
 // =====================
-async function addKeys(productName, keysArray = []) {
+async function addKeys(product_name, keysArray = []) {
 
     const rows = keysArray
         .map(k => k?.trim())
         .filter(Boolean)
         .map(k => ({
-            product_name: productName,
+            product_name,
             key: k,
             status: "available"
         }));
@@ -91,29 +97,29 @@ async function addKeys(productName, keysArray = []) {
 }
 
 // =====================
-// STOCK COUNT (AVAILABLE ONLY)
+// STOCK COUNT
 // =====================
-async function getStock(productName) {
+async function getStock(product_name) {
 
     const { count, error } = await supabase
         .from("keys")
         .select("*", { count: "exact", head: true })
-        .eq("product_name", productName)
+        .eq("product_name", product_name)
         .eq("status", "available");
 
     logError("getStock", error);
-    return { count: count || 0 };
+    return count || 0;
 }
 
 // =====================
 // RANDOM KEY (AVAILABLE ONLY)
 // =====================
-async function getRandomKey(productName) {
+async function getRandomKey(product_name) {
 
     const { data, error } = await supabase
         .from("keys")
         .select("*")
-        .eq("product_name", productName)
+        .eq("product_name", product_name)
         .eq("status", "available");
 
     logError("getRandomKey", error);
@@ -128,16 +134,22 @@ async function getRandomKey(productName) {
 // =====================
 async function useKey(keyId) {
 
-    const { error } = await supabase
+    if (!keyId) return null;
+
+    const { data, error } = await supabase
         .from("keys")
         .update({ status: "used" })
-        .eq("id", keyId);
+        .eq("id", keyId)
+        .eq("status", "available")
+        .select()
+        .single();
 
     logError("useKey", error);
+    return data || null;
 }
 
 // =====================
-// LOCK SYSTEM (OPTIONAL LOGIC STORAGE)
+// LOCK LOG (optional tracking)
 // =====================
 async function lockKey(payload) {
 

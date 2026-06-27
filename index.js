@@ -1,13 +1,20 @@
+require("dotenv").config();
+
 const express = require("express");
 const app = express();
 
+// ================= EXPRESS =================
 app.get("/", (req, res) => {
     res.send("VEX BOT ONLINE");
 });
 
-app.listen(3000);
-require("dotenv").config();
+// 🔥 FIX: Render ต้องใช้ process.env.PORT
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+    console.log("🌐 Express running on port " + PORT);
+});
 
+// ================= DISCORD BOT =================
 const {
     Client,
     GatewayIntentBits,
@@ -128,7 +135,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 });
             }
 
-            // ================= CONFIRM SELL (WITH LOG) =================
             if (interaction.customId.startsWith("confirm_")) {
                 const id = interaction.customId.split("_")[1];
                 const data = db.confirmKey(id);
@@ -221,7 +227,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             return interaction.showModal(modal);
         }
 
-        // ================= ADD STOCK (WITH LOG) =================
+        // ================= ADD STOCK =================
         if (interaction.isModalSubmit() &&
             interaction.customId.startsWith("add_stock_modal_")) {
 
@@ -254,7 +260,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             const stock = db.getStock(product)?.count || 0;
 
-            // ===== STOCK LOG =====
             const log = new EmbedBuilder()
                 .setTitle("📥 STOCK LOG")
                 .setColor("Green")
@@ -403,5 +408,11 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
     }
 });
+
+// 🔥 FIX: กัน crash ถ้า TOKEN ไม่มี
+if (!process.env.TOKEN) {
+    console.error("❌ TOKEN missing in environment variables");
+    process.exit(1);
+}
 
 client.login(process.env.TOKEN);

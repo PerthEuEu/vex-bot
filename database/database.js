@@ -1,10 +1,7 @@
 const Database = require("better-sqlite3");
-
 const db = new Database("vex.db");
 
-// =====================
-// PRODUCTS
-// =====================
+// ================= TABLES =================
 db.prepare(`
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -15,9 +12,6 @@ CREATE TABLE IF NOT EXISTS products (
 )
 `).run();
 
-// =====================
-// KEYS
-// =====================
 db.prepare(`
 CREATE TABLE IF NOT EXISTS keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -27,9 +21,6 @@ CREATE TABLE IF NOT EXISTS keys (
 )
 `).run();
 
-// =====================
-// PENDING KEYS
-// =====================
 db.prepare(`
 CREATE TABLE IF NOT EXISTS pending_keys (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -44,15 +35,9 @@ CREATE TABLE IF NOT EXISTS pending_keys (
 )
 `).run();
 
-
-// =====================
-// PRODUCTS
-// =====================
+// ================= PRODUCTS =================
 function addProduct(name, cost, resell_price, customer_price) {
     if (!name) return;
-
-    const reseller_profit = (resell_price || 0) - (cost || 0);
-    const customer_profit = (customer_price || 0) - (cost || 0);
 
     return db.prepare(`
         INSERT OR IGNORE INTO products
@@ -62,23 +47,14 @@ function addProduct(name, cost, resell_price, customer_price) {
 }
 
 function getProduct(name) {
-    if (!name) return null;
-
-    return db.prepare(`
-        SELECT * FROM products WHERE name=?
-    `).get(name);
+    return db.prepare(`SELECT * FROM products WHERE name=?`).get(name);
 }
 
 function getProducts() {
-    return db.prepare(`
-        SELECT * FROM products ORDER BY name
-    `).all();
+    return db.prepare(`SELECT * FROM products ORDER BY name`).all();
 }
 
-
-// =====================
-// KEYS
-// =====================
+// ================= KEYS =================
 function addKeys(productName, keysArray) {
     if (!productName || !Array.isArray(keysArray)) return;
 
@@ -89,8 +65,7 @@ function addKeys(productName, keysArray) {
 
     const tx = db.transaction((keys) => {
         for (const k of keys) {
-            const clean = k.trim();
-            if (clean) stmt.run(productName, clean);
+            if (k?.trim()) stmt.run(productName, k.trim());
         }
     });
 
@@ -98,39 +73,24 @@ function addKeys(productName, keysArray) {
 }
 
 function getStock(productName) {
-    if (!productName) return { count: 0 };
-
     return db.prepare(`
         SELECT COUNT(*) as count
         FROM keys
-        WHERE product_name = ? AND status = 'available'
-    `).get(productName);
+        WHERE product_name=? AND status='available'
+    `).get(productName) || { count: 0 };
 }
 
 function getRandomKey(productName) {
     return db.prepare(`
         SELECT * FROM keys
-        WHERE product_name = ? AND status = 'available'
+        WHERE product_name=? AND status='available'
         ORDER BY RANDOM()
         LIMIT 1
     `).get(productName);
 }
 
-function markUsed(id) {
-    if (!id) return;
-
-    return db.prepare(`
-        UPDATE keys SET status='used' WHERE id=?
-    `).run(id);
-}
-
-
-// =====================
-// LOCK SYSTEM
-// =====================
+// ================= LOCK SYSTEM =================
 function lockKey(data) {
-    if (!data?.key_id || !data?.key) return null;
-
     return db.prepare(`
         INSERT INTO pending_keys
         (user_id, product_name, key_id, key, type, price, profit)
@@ -147,50 +107,29 @@ function lockKey(data) {
 }
 
 function confirmKey(id) {
-    const item = db.prepare(`
-        SELECT * FROM pending_keys WHERE id=?
-    `).get(id);
-
+    const item = db.prepare(`SELECT * FROM pending_keys WHERE id=?`).get(id);
     if (!item) return null;
-    if (item.status !== "pending") return item;
 
-    db.prepare(`
-        UPDATE keys SET status='used' WHERE id=?
-    `).run(item.key_id);
-
-    db.prepare(`
-        UPDATE pending_keys SET status='confirmed' WHERE id=?
-    `).run(id);
+    db.prepare(`UPDATE keys SET status='used' WHERE id=?`).run(item.key_id);
+    db.prepare(`UPDATE pending_keys SET status='confirmed' WHERE id=?`).run(id);
 
     return item;
 }
 
 function cancelKey(id) {
-    const item = db.prepare(`
-        SELECT * FROM pending_keys WHERE id=?
-    `).get(id);
-
-    if (!item) return null;
-    if (item.status !== "pending") return item;
-
     return db.prepare(`
         UPDATE pending_keys SET status='cancelled' WHERE id=?
     `).run(id);
 }
 
-
-// =====================
-// EXPORT
-// =====================
 module.exports = {
     db,
     addProduct,
+    getProduct,
+    getProducts,
     addKeys,
     getStock,
     getRandomKey,
-    markUsed,
-    getProduct,
-    getProducts,
     lockKey,
     confirmKey,
     cancelKey

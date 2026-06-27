@@ -1,24 +1,29 @@
 require("dotenv").config();
 const { createClient } = require("@supabase/supabase-js");
 
+// ===================== ENV =====================
 if (!process.env.SUPABASE_URL || !process.env.SUPABASE_KEY) {
     console.log("❌ Supabase env missing!");
     process.exit(1);
 }
 
+// ===================== CLIENT =====================
 const supabase = createClient(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_KEY
 );
 
-// ================= ERROR =================
+// ===================== ERROR =====================
 function logError(action, error) {
     if (!error) return;
+
     console.log(`❌ Supabase Error [${action}]`);
-    console.log(error.message || error);
+    console.log("Message:", error.message);
+    console.log("Code:", error.code || "unknown");
+    console.log("Details:", error.details || "none");
 }
 
-// ================= CATEGORY =================
+// ===================== CATEGORY (🔥 FIX ADDED) =====================
 async function getCategories() {
     const { data, error } = await supabase
         .from("categories")
@@ -29,30 +34,33 @@ async function getCategories() {
     return Array.isArray(data) ? data : [];
 }
 
-// ================= PRODUCTS =================
-async function addProduct(name, category = "default", cost = 0, resell_price = 0, customer_price = 0) {
+// ===================== PRODUCTS =====================
+async function addProduct(name, cost = 0, resell_price = 0, customer_price = 0) {
+
     const { data, error } = await supabase
         .from("products")
-        .insert([{ name, category, cost, resell_price, customer_price }])
+        .insert([{ name, cost, resell_price, customer_price }])
         .select()
-        .single();
+        .maybeSingle();
 
     logError("addProduct", error);
     return data || null;
 }
 
 async function getProduct(name) {
+
     const { data, error } = await supabase
         .from("products")
         .select("*")
         .eq("name", name)
-        .single();
+        .maybeSingle();
 
     logError("getProduct", error);
     return data || null;
 }
 
 async function getProducts() {
+
     const { data, error } = await supabase
         .from("products")
         .select("*")
@@ -62,8 +70,9 @@ async function getProducts() {
     return Array.isArray(data) ? data : [];
 }
 
-// ================= FILTER BY CATEGORY =================
+// ===================== BY CATEGORY (🔥 FIX ADDED) =====================
 async function getProductsByCategory(category) {
+
     const { data, error } = await supabase
         .from("products")
         .select("*")
@@ -74,14 +83,14 @@ async function getProductsByCategory(category) {
     return Array.isArray(data) ? data : [];
 }
 
-// ================= ADD KEYS =================
-async function addKeys(product_name, keysArray = []) {
+// ===================== KEYS =====================
+async function addKeys(productName, keysArray = []) {
 
     const rows = keysArray
         .map(k => k?.trim())
         .filter(Boolean)
         .map(k => ({
-            product_name,
+            product_name: productName,
             key: k,
             status: "available"
         }));
@@ -97,73 +106,137 @@ async function addKeys(product_name, keysArray = []) {
     return data || [];
 }
 
-// ================= STOCK =================
-async function getStock(product_name) {
+// ===================== STOCK =====================
+async function getStock(productName) {
 
     const { count, error } = await supabase
         .from("keys")
         .select("*", { count: "exact", head: true })
-        .eq("product_name", product_name)
+        .eq("product_name", productName)
         .eq("status", "available");
 
     logError("getStock", error);
 
-    return Number(count || 0);
+    return {
+        count: count || 0
+    };
 }
 
-// ================= 🔥 SAFE ATOMIC CLAIM KEY =================
-async function claimKey(product_name) {
+// ===================== RANDOM KEY =====================
+async function getRandomKey(productName) {
 
-    // 1️⃣ select key
     const { data, error } = await supabase
         .from("keys")
-        .select("id, key")
-        .eq("product_name", product_name)
-        .eq("status", "available")
-        .limit(1)
-        .maybeSingle();
+        .select("id, key, product_name")
+        .eq("product_name", productName)
+        .eq("status", "available");
 
-    if (error || !data) {
-        logError("claimKey-select", error);
-        return null;
-    }
+    logError("getRandomKey", error);
 
-    // 2️⃣ atomic lock (กันแย่ง 100%)
-    const { data: locked, error: lockErr } = await supabase
+    if (!data?.length) return null;
+
+    return data[Math.floor(Math.random() * data.length)];
+}
+
+// ===================== MARK USED (SAFE) =====================
+async function markKeyUsed(keyId) {
+
+    const { data, error } = await supabase
         .from("keys")
         .update({
             status: "used",
             used_at: new Date().toISOString()
         })
-        .eq("id", data.id)
+        .eq("id", keyId)
         .eq("status", "available")
         .select()
         .maybeSingle();
 
-    if (lockErr) {
-        logError("claimKey-lock", lockErr);
-        return null;
-    }
-
-    if (!locked) return null;
-
-    return locked;
+    logError("markKeyUsed", error);
+    return data || null;
 }
 
+// ===================== PENDING SYSTEM =====================
+async function lockKey(payload) {
+
+    const { data, error } = await supabase
+        .from("pending_keys")
+        .insert([{
+            user_id: payload.user_id,
+            product_name: payload.product_name,
+            key_id: payload.key_id,
+            key: payload.key,
+            type: payload.type,
+            price: payload.price,
+            profit: payload.profit,
+            status: "pending"
+        }])
+        .select()
+        .maybeSingle();
+
+    logError("lockKey", error);
+    return data || null;
+}
+
+async function confirmKey(id) {
+
+    const { data: item, error } = await supabase
+        .from("pending_keys")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+
+    logError("confirmKey", error);
+
+    if (!item || item.status !== "pending") return null;
+
+    await markKeyUsed(item.key_id);
+
+    await supabase
+        .from("pending_keys")
+        .update({ status: "confirmed" })
+        .eq("id", id);
+
+    return item;
+}
+
+async function cancelKey(id) {
+
+    const { data: item, error } = await supabase
+        .from("pending_keys")
+        .select("*")
+        .eq("id", id)
+        .maybeSingle();
+
+    logError("cancelKey", error);
+
+    if (!item || item.status !== "pending") return null;
+
+    await supabase
+        .from("pending_keys")
+        .update({ status: "cancelled" })
+        .eq("id", id);
+
+    return item;
+}
+
+// ===================== EXPORT =====================
 module.exports = {
     supabase,
 
-    // category
-    getCategories,
-
-    // product
     addProduct,
     getProduct,
     getProducts,
+
+    getCategories,
     getProductsByCategory,
 
-    // stock
     addKeys,
     getStock,
-    claimKey
+    getRandomKey,
+
+    lockKey,
+    confirmKey,
+    cancelKey,
+    markKeyUsed
 };

@@ -37,13 +37,18 @@ function sendLog(channelId, embed) {
     if (!channelId) return;
     const ch = client.channels.cache.get(channelId);
     if (!ch) return;
-    ch.send({ embeds: [embed] }).catch(console.error);
+    ch.send({ embeds: [embed] }).catch(() => {});
 }
 
 // ================= READY =================
 client.once(Events.ClientReady, () => {
     console.log(`✅ ONLINE: ${client.user.tag}`);
 });
+
+// ================= NORMALIZE FIX =================
+function norm(str) {
+    return (str || "").trim();
+}
 
 // ================= INTERACTIONS =================
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -79,16 +84,18 @@ try {
 
         const products = await db.getProducts();
 
-        if (!products || products.length === 0)
+        if (!products?.length)
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
 
         const menu = new StringSelectMenuBuilder()
             .setCustomId("stock_select")
             .setPlaceholder("เลือกสินค้า")
-            .addOptions(products.slice(0, 25).map(p => ({
-                label: p.name,
-                value: p.name
-            })));
+            .addOptions(
+                products.slice(0, 25).map(p => ({
+                    label: p.name,
+                    value: norm(p.name) // 🔥 FIX สำคัญ
+                }))
+            );
 
         return interaction.reply({
             content: "📦 เลือกสินค้า",
@@ -157,16 +164,18 @@ try {
 
         const products = await db.getProducts();
 
-        if (!products || products.length === 0)
+        if (!products?.length)
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
 
         const menu = new StringSelectMenuBuilder()
             .setCustomId("sell_select")
             .setPlaceholder("เลือกสินค้า")
-            .addOptions(products.slice(0, 25).map(p => ({
-                label: p.name,
-                value: p.name
-            })));
+            .addOptions(
+                products.slice(0, 25).map(p => ({
+                    label: p.name,
+                    value: norm(p.name) // 🔥 FIX
+                }))
+            );
 
         return interaction.reply({
             content: "📦 เลือกสินค้า",
@@ -195,7 +204,7 @@ try {
         });
     }
 
-    // ================= SELL TYPE (FIXED FINAL) =================
+    // ================= SELL TYPE =================
     if (interaction.isStringSelectMenu() && interaction.customId.startsWith("sell_type_")) {
 
         const product = interaction.customId.replace("sell_type_", "");
@@ -206,7 +215,7 @@ try {
         if (!p)
             return interaction.reply({ content: "❌ no product", ephemeral: true });
 
-        // 🔥 atomic claim key
+        // 🔥 CLAIM KEY (REAL FIX)
         const key = await db.claimKey(product);
 
         if (!key)
@@ -221,7 +230,7 @@ try {
                 .setTitle("🔑 SELL OUT")
                 .addFields(
                     { name: "Product", value: product },
-                    { name: "Key", value: key.key },   // ✅ FIX
+                    { name: "Key", value: key.key },
                     { name: "Buyer", value: `<@${interaction.user.id}>` },
                     { name: "Type", value: type },
                     { name: "Price", value: String(price) },
@@ -232,7 +241,7 @@ try {
         );
 
         return interaction.reply({
-            content: `🔑 KEY: ${key.key}`,   // ✅ FIX
+            content: `🔑 KEY: ${key.key}`,
             ephemeral: true
         });
     }

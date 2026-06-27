@@ -5,34 +5,29 @@ const supabase = createClient(
     process.env.SUPABASE_KEY
 );
 
-// ================= NORMALIZE (สำคัญมาก) =================
+// ================= CLEAN =================
 function norm(str) {
-    return (str || "")
-        .trim()
-        .toLowerCase()
-        .replace(/\s+/g, " ");
+    return (str || "").trim();
 }
 
 // ================= PRODUCTS =================
 async function getProducts() {
     const { data, error } = await supabase
         .from("products")
-        .select("*")
-        .order("name", { ascending: true });
+        .select("*");
 
-    if (error) console.log("getProducts error:", error);
-
+    if (error) console.log(error);
     return data || [];
 }
 
 async function getProduct(name) {
-    const { data, error } = await supabase
+    const clean = norm(name);
+
+    const { data } = await supabase
         .from("products")
         .select("*")
-        .eq("name", name)
+        .eq("name", clean)
         .maybeSingle();
-
-    if (error) console.log("getProduct error:", error);
 
     return data || null;
 }
@@ -40,10 +35,10 @@ async function getProduct(name) {
 // ================= ADD KEYS =================
 async function addKeys(product_name, keys) {
 
-    const cleanName = norm(product_name);
+    const clean = norm(product_name);
 
     const rows = keys.map(k => ({
-        product_name: cleanName,
+        product_name: clean,
         key: k.trim(),
         status: "available"
     }));
@@ -52,7 +47,10 @@ async function addKeys(product_name, keys) {
         .from("keys")
         .insert(rows);
 
-    if (error) console.log("addKeys error:", error);
+    if (error) {
+        console.log("ADD ERROR:", error);
+        return [];
+    }
 
     return rows;
 }
@@ -60,77 +58,47 @@ async function addKeys(product_name, keys) {
 // ================= STOCK =================
 async function getStock(product_name) {
 
-    const cleanName = norm(product_name);
+    const clean = norm(product_name);
 
     const { count, error } = await supabase
         .from("keys")
         .select("*", { count: "exact", head: true })
-        .eq("product_name", cleanName)
+        .eq("product_name", clean)
         .eq("status", "available");
 
-    if (error) console.log("stock error:", error);
+    if (error) console.log(error);
 
     return count || 0;
 }
 
-// ================= CLAIM KEY (FIXED 100%) =================
+// ================= CLAIM KEY (FIXED REAL ATOMIC) =================
 async function claimKey(product_name) {
 
-    const cleanName = norm(product_name);
+    const clean = norm(product_name);
 
-    // ดึง key ที่ยังว่าง
+    // 🔥 STEP 1: lock 1 key
     const { data, error } = await supabase
         .from("keys")
         .select("id, key")
-        .eq("product_name", cleanName)
+        .eq("product_name", clean)
         .eq("status", "available")
         .limit(1);
 
-    if (error) {
-        console.log("claim select error:", error);
-        return null;
-    }
-
-    if (!data || data.length === 0) return null;
+    if (error || !data?.length) return null;
 
     const key = data[0];
 
-    // ล็อกทันที
-    const { data: updated, error: updateError } = await supabase
+    // 🔥 STEP 2: update with condition
+    const { data: updated, error: upErr } = await supabase
         .from("keys")
-        .update({
-            status: "used",
-            used_at: new Date().toISOString()
-        })
+        .update({ status: "used", used_at: new Date().toISOString() })
         .eq("id", key.id)
         .eq("status", "available")
         .select();
 
-    if (updateError) {
-        console.log("claim update error:", updateError);
-        return null;
-    }
-
-    if (!updated || updated.length === 0) return null;
+    if (upErr || !updated?.length) return null;
 
     return key;
-}
-
-// ================= USE KEY =================
-async function useKey(id) {
-    const { data, error } = await supabase
-        .from("keys")
-        .update({
-            status: "used",
-            used_at: new Date().toISOString()
-        })
-        .eq("id", id)
-        .select()
-        .maybeSingle();
-
-    if (error) console.log("useKey error:", error);
-
-    return data || null;
 }
 
 module.exports = {
@@ -139,6 +107,5 @@ module.exports = {
     getProduct,
     addKeys,
     getStock,
-    claimKey,
-    useKey
+    claimKey
 };

@@ -2,7 +2,10 @@ require("dotenv").config();
 const express = require("express");
 const app = express();
 
-app.get("/", (req, res) => res.send("VEX BOT ONLINE"));
+// ================= EXPRESS =================
+app.get("/", (req, res) => {
+    res.send("VEX BOT ONLINE");
+});
 
 app.listen(process.env.PORT || 10000, () => {
     console.log("🌐 Express running");
@@ -34,14 +37,14 @@ const client = new Client({
     ]
 });
 
-// ================= LOG CHANNEL =================
+// ================= ENV LOG =================
 const SELL_LOG = process.env.SELL_LOG_CHANNEL_ID;
 const STOCK_LOG = process.env.STOCK_LOG_CHANNEL_ID;
 
 // ================= READY =================
 client.once(Events.ClientReady, () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
-    console.log("🔥 BOT READY");
+    console.log("🔥 SYSTEM ONLINE");
 });
 
 // ================= MAIN =================
@@ -76,7 +79,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             const products = await db.getProducts();
 
-            if (!products.length) {
+            if (!products?.length) {
                 return interaction.reply({
                     content: "❌ ไม่มีสินค้า",
                     flags: MessageFlags.Ephemeral
@@ -87,7 +90,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 .setCustomId("stock_select_product")
                 .setPlaceholder("เลือกสินค้า")
                 .addOptions(
-                    products.slice(0, 25).map(p => ({
+                    products.slice(0, 24).map(p => ({
                         label: p.name,
                         value: p.name
                     }))
@@ -100,7 +103,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
-        // ================= SELL BUTTON =================
+        // ================= SELL =================
         if (interaction.isButton() && interaction.customId === "sell") {
 
             const products = await db.getProducts();
@@ -109,7 +112,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 .setCustomId("sell_select_product")
                 .setPlaceholder("เลือกสินค้า")
                 .addOptions(
-                    products.slice(0, 25).map(p => ({
+                    products.slice(0, 24).map(p => ({
                         label: p.name,
                         value: p.name
                     }))
@@ -135,9 +138,12 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const keys = new TextInputBuilder()
                 .setCustomId("keys")
                 .setLabel("1 บรรทัด = 1 key")
-                .setStyle(TextInputStyle.Paragraph);
+                .setStyle(TextInputStyle.Paragraph)
+                .setRequired(true);
 
-            modal.addComponents(new ActionRowBuilder().addComponents(keys));
+            modal.addComponents(
+                new ActionRowBuilder().addComponents(keys)
+            );
 
             return interaction.showModal(modal);
         }
@@ -185,19 +191,16 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 .setCustomId("add_product_modal")
                 .setTitle("เพิ่มสินค้า");
 
+            const name = new TextInputBuilder().setCustomId("name").setLabel("ชื่อ").setStyle(TextInputStyle.Short).setRequired(true);
+            const cost = new TextInputBuilder().setCustomId("cost").setLabel("ทุน").setStyle(TextInputStyle.Short).setRequired(true);
+            const reseller = new TextInputBuilder().setCustomId("reseller").setLabel("Reseller").setStyle(TextInputStyle.Short).setRequired(true);
+            const customer = new TextInputBuilder().setCustomId("customer").setLabel("Customer").setStyle(TextInputStyle.Short).setRequired(true);
+
             modal.addComponents(
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder().setCustomId("name").setLabel("ชื่อ").setStyle(TextInputStyle.Short)
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder().setCustomId("cost").setLabel("ทุน").setStyle(TextInputStyle.Short)
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder().setCustomId("reseller").setLabel("Resell").setStyle(TextInputStyle.Short)
-                ),
-                new ActionRowBuilder().addComponents(
-                    new TextInputBuilder().setCustomId("customer").setLabel("Customer").setStyle(TextInputStyle.Short)
-                )
+                new ActionRowBuilder().addComponents(name),
+                new ActionRowBuilder().addComponents(cost),
+                new ActionRowBuilder().addComponents(reseller),
+                new ActionRowBuilder().addComponents(customer)
             );
 
             return interaction.showModal(modal);
@@ -219,7 +222,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
-        // ================= SELL FLOW =================
+        // ================= SELL FLOW STEP 1 =================
         if (interaction.isStringSelectMenu() &&
             interaction.customId === "sell_select_product") {
 
@@ -240,6 +243,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
+        // ================= SELL FLOW STEP 2 =================
         if (interaction.isStringSelectMenu() &&
             interaction.customId.startsWith("sell_type_")) {
 
@@ -248,6 +252,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             const p = await db.getProduct(product);
             const stock = await db.getStock(product);
+            const key = await db.getRandomKey(product);
+
+            if (!key) {
+                return interaction.reply({
+                    content: "❌ ไม่มี stock",
+                    flags: MessageFlags.Ephemeral
+                });
+            }
 
             const price = type === "reseller" ? p.resell_price : p.customer_price;
             const profit = price - p.cost;
@@ -257,7 +269,6 @@ client.on(Events.InteractionCreate, async (interaction) => {
                 .addFields(
                     { name: "Product", value: product },
                     { name: "Type", value: type },
-                    { name: "Cost", value: `${p.cost}` },
                     { name: "Price", value: `${price}` },
                     { name: "Profit", value: `${profit}` },
                     { name: "Stock", value: `${stock.count}` }
@@ -266,8 +277,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
-                    .setCustomId(`confirm_sell_${product}_${type}`)
-                    .setLabel("CONFIRM")
+                    .setCustomId(`confirm_${product}_${type}`)
+                    .setLabel("CONFIRM SELL")
                     .setStyle(ButtonStyle.Success)
             );
 
@@ -278,10 +289,15 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
+        // ================= CONFIRM SELL =================
         if (interaction.isButton() &&
-            interaction.customId.startsWith("confirm_sell_")) {
+            interaction.customId.startsWith("confirm_")) {
 
-            const [, , product, type] = interaction.customId.split("_");
+            const data = interaction.customId.replace("confirm_", "");
+            const last = data.lastIndexOf("_");
+
+            const product = data.slice(0, last);
+            const type = data.slice(last + 1);
 
             const p = await db.getProduct(product);
             const key = await db.getRandomKey(product);
@@ -328,7 +344,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         }
 
     } catch (err) {
-        console.log("ERROR:", err);
+        console.log("❌ ERROR:", err);
 
         if (!interaction.replied) {
             return interaction.reply({

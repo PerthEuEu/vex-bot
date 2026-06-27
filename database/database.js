@@ -11,6 +11,7 @@ const supabase = createClient(
     process.env.SUPABASE_KEY
 );
 
+// ================= ERROR =================
 function logError(action, error) {
     if (!error) return;
     console.log(`❌ Supabase Error [${action}]`);
@@ -23,7 +24,7 @@ async function addProduct(name, cost = 0, resell_price = 0, customer_price = 0) 
         .from("products")
         .insert([{ name, cost, resell_price, customer_price }])
         .select()
-        .maybeSingle();
+        .single();
 
     logError("addProduct", error);
     return data || null;
@@ -34,7 +35,7 @@ async function getProduct(name) {
         .from("products")
         .select("*")
         .eq("name", name)
-        .maybeSingle();
+        .single();
 
     logError("getProduct", error);
     return data || null;
@@ -75,6 +76,7 @@ async function addKeys(product_name, keysArray = []) {
 
 // ================= STOCK =================
 async function getStock(product_name) {
+
     const { count, error } = await supabase
         .from("keys")
         .select("*", { count: "exact", head: true })
@@ -83,46 +85,42 @@ async function getStock(product_name) {
 
     logError("getStock", error);
 
-    return Number(count || 0);
+    return count || 0;
 }
 
-// ================= 🔥 FIX: ATOMIC CLAIM (ตัวจริง) =================
+// ================= 🔥 TRUE ATOMIC CLAIM KEY =================
 async function claimKey(product_name) {
 
-    // 🔥 สำคัญ: ใช้ RPC-style lock logic (2-step safe)
-
-    // 1) หา key ที่ยัง available
+    // 🔥 STEP 1: lock 1 available key (NO race)
     const { data, error } = await supabase
         .from("keys")
-        .select("*")
+        .update({
+            status: "locked"
+        })
         .eq("product_name", product_name)
         .eq("status", "available")
-        .limit(1);
+        .limit(1)
+        .select()
+        .maybeSingle();
 
-    logError("claimKey-select", error);
+    logError("claimKey-lock", error);
 
-    if (!data || data.length === 0) return null;
+    if (!data) return null;
 
-    const key = data[0];
-
-    // 2) ล็อคแบบกัน race (สำคัญมาก)
-    const { data: locked, error: lockErr } = await supabase
+    // 🔥 STEP 2: finalize usage
+    const { data: used, error: err2 } = await supabase
         .from("keys")
         .update({
             status: "used",
             used_at: new Date().toISOString()
         })
-        .eq("id", key.id)
-        .eq("status", "available") // 🔥 กันคนแย่ง
+        .eq("id", data.id)
         .select()
         .maybeSingle();
 
-    logError("claimKey-lock", lockErr);
+    logError("claimKey-finalize", err2);
 
-    // ❌ โดนแย่ง = null
-    if (!locked) return null;
-
-    return locked;
+    return used || data;
 }
 
 module.exports = {

@@ -9,33 +9,35 @@ module.exports = async (interaction) => {
 
     try {
 
-        // 🔥 FIX 1: กัน timeout
-        await interaction.deferReply({ ephemeral: true });
+        // ================= SAFE DEFER =================
+        if (!interaction.deferred && !interaction.replied) {
+            await interaction.deferReply({ ephemeral: true });
+        }
 
         const products = await db.getProducts();
 
         if (!Array.isArray(products) || products.length === 0) {
-            return interaction.editReply("❌ ยังไม่มีสินค้าในระบบ");
+            return interaction.editReply({
+                content: "❌ ยังไม่มีสินค้าในระบบ",
+                components: []
+            });
         }
 
-        const safeProducts = products.slice(0, 24);
+        // ================= SAFE LIMIT (Discord max 25 options) =================
+        const safeProducts = products.slice(0, 25);
 
         const menu = new StringSelectMenuBuilder()
             .setCustomId("stock_select_product")
-            .setPlaceholder("📦 เลือกหมวดสต็อก")
-            .addOptions([
-                ...safeProducts.map((p, i) => ({
+            .setPlaceholder("📦 เลือกสินค้าเพื่อเติมสต็อก")
+            .addOptions(
+                safeProducts.map((p) => ({
                     label: p.name.slice(0, 100),
-                    value: `product_${i}_${p.name}` // 🔥 FIX unique value
-                })),
-                {
-                    label: "➕ เพิ่มสินค้าใหม่",
-                    value: "new_product"
-                }
-            ]);
+                    value: p.name
+                }))
+            );
 
         return interaction.editReply({
-            content: "📥 เลือกหมวดหมู่สินค้าที่ต้องการเติมสต็อก",
+            content: "📥 เลือกสินค้าที่ต้องการเติมสต็อก",
             components: [
                 new ActionRowBuilder().addComponents(menu)
             ]
@@ -43,19 +45,19 @@ module.exports = async (interaction) => {
 
     } catch (err) {
 
-        console.log("❌ addstock error:", err);
+        console.log("❌ addstock error:", err?.message || err);
 
         try {
-            if (!interaction.replied && !interaction.deferred) {
+            if (interaction.deferred || interaction.replied) {
+                return interaction.editReply("❌ โหลดข้อมูลสินค้าไม่สำเร็จ");
+            } else {
                 return interaction.reply({
                     content: "❌ โหลดข้อมูลสินค้าไม่สำเร็จ",
                     ephemeral: true
                 });
-            } else {
-                return interaction.editReply("❌ โหลดข้อมูลสินค้าไม่สำเร็จ");
             }
         } catch (e) {
-            console.log("❌ reply failed:", e);
+            console.log("❌ reply fallback failed:", e?.message || e);
         }
     }
 };

@@ -1,0 +1,4 @@
+node_modules 
+vex.db 
+.env 
+package-lock.json 

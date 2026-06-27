@@ -5,11 +5,16 @@ const {
 
 const db = require("../database/database");
 
+// ================= SAFE REPLY =================
 async function safeReply(interaction, payload) {
     try {
+        if (!interaction?.isRepliable?.()) return;
+
         if (interaction.deferred) return interaction.editReply(payload);
         if (interaction.replied) return interaction.followUp(payload);
+
         return interaction.reply(payload);
+
     } catch (err) {
         console.log("safeReply error:", err?.message || err);
     }
@@ -18,31 +23,46 @@ async function safeReply(interaction, payload) {
 module.exports = async (interaction) => {
     try {
 
-        // ================= VALIDATION =================
-        if (!interaction || !interaction.isRepliable?.()) {
-            return console.log("Invalid interaction");
-        }
+        if (!interaction) return;
 
         // ================= GET CATEGORIES =================
-        const categories = await db.getCategories?.();
+        const categories = await db.getCategories();
 
-        if (!categories || !Array.isArray(categories) || categories.length === 0) {
+        if (!Array.isArray(categories)) {
             return safeReply(interaction, {
-                content: "❌ ไม่มีหมวดหมู่ในระบบ (getCategories ว่างหรือยังไม่ได้สร้าง)",
+                content: "❌ DB ERROR: getCategories failed",
+                ephemeral: true
+            });
+        }
+
+        if (categories.length === 0) {
+            return safeReply(interaction, {
+                content: "❌ ไม่มีหมวดหมู่ในระบบ",
                 ephemeral: true
             });
         }
 
         // ================= BUILD MENU =================
+        const options = categories
+            .slice(0, 25)
+            .map(c => {
+
+                const id = c.id !== undefined && c.id !== null
+                    ? String(c.id)
+                    : String(c.name);
+
+                const name = c.name || "UNKNOWN";
+
+                return {
+                    label: String(name).slice(0, 100),
+                    value: id.slice(0, 100)
+                };
+            });
+
         const menu = new StringSelectMenuBuilder()
             .setCustomId("stock_select_category")
             .setPlaceholder("📂 เลือกหมวดหมู่")
-            .addOptions(
-                categories.slice(0, 25).map(c => ({
-                    label: String(c.name).slice(0, 100), // กันพัง Discord limit
-                    value: String(c.name).slice(0, 100)
-                }))
-            );
+            .addOptions(options);
 
         // ================= RESPONSE =================
         return safeReply(interaction, {

@@ -85,42 +85,47 @@ async function getStock(product_name) {
 
     logError("getStock", error);
 
-    return count || 0;
+    return Number(count || 0);
 }
 
-// ================= 🔥 TRUE ATOMIC CLAIM KEY =================
+// ================= 🔥 FIXED ATOMIC CLAIM KEY (REAL SAFE) =================
 async function claimKey(product_name) {
 
-    // 🔥 STEP 1: lock 1 available key (NO race)
+    // 🔥 STEP 1: get 1 key
     const { data, error } = await supabase
         .from("keys")
-        .update({
-            status: "locked"
-        })
+        .select("id, key, product_name")
         .eq("product_name", product_name)
         .eq("status", "available")
         .limit(1)
-        .select()
         .maybeSingle();
 
-    logError("claimKey-lock", error);
+    if (error || !data) {
+        logError("claimKey-select", error);
+        return null;
+    }
 
-    if (!data) return null;
-
-    // 🔥 STEP 2: finalize usage
-    const { data: used, error: err2 } = await supabase
+    // 🔥 STEP 2: atomic lock (IMPORTANT FIX)
+    const { data: locked, error: lockErr } = await supabase
         .from("keys")
         .update({
             status: "used",
             used_at: new Date().toISOString()
         })
         .eq("id", data.id)
+        .eq("status", "available") // กันคนแย่ง
         .select()
         .maybeSingle();
 
-    logError("claimKey-finalize", err2);
+    if (lockErr) {
+        logError("claimKey-lock", lockErr);
+        return null;
+    }
 
-    return used || data;
+    // ❌ ถ้าโดนแย่ง = null
+    if (!locked) return null;
+
+    return locked;
 }
 
 module.exports = {

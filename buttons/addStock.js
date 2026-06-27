@@ -23,12 +23,12 @@ module.exports = async (interaction) => {
             });
         }
 
-        // ================= SAFE LIMIT (Discord max 25 options) =================
+        // ================= LIMIT SAFE =================
         const safeProducts = products.slice(0, 25);
 
         const menu = new StringSelectMenuBuilder()
-            .setCustomId("stock_select_product")
-            .setPlaceholder("📦 เลือกสินค้าเพื่อเติมสต็อก")
+            .setCustomId("stock_select") // ✅ FIX สำคัญ: แยกจาก sell
+            .setPlaceholder("📦 เลือกสินค้าที่ต้องการเติมสต็อก")
             .addOptions(
                 safeProducts.map((p) => ({
                     label: p.name.slice(0, 100),

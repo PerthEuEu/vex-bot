@@ -49,11 +49,12 @@ async function getProducts() {
         .order("name", { ascending: true });
 
     logError("getProducts", error);
-    return data || [];
+    return Array.isArray(data) ? data : [];
 }
 
 // ================= KEYS =================
 async function addKeys(product_name, keysArray = []) {
+
     const rows = keysArray
         .map(k => k?.trim())
         .filter(Boolean)
@@ -63,7 +64,7 @@ async function addKeys(product_name, keysArray = []) {
             status: "available"
         }));
 
-    if (!rows.length) return [];
+    if (rows.length === 0) return [];
 
     const { data, error } = await supabase
         .from("keys")
@@ -74,7 +75,7 @@ async function addKeys(product_name, keysArray = []) {
     return data || [];
 }
 
-// 🔥 FIX: STOCK ต้อง return number
+// ================= STOCK (FIXED) =================
 async function getStock(product_name) {
     const { count, error } = await supabase
         .from("keys")
@@ -83,11 +84,13 @@ async function getStock(product_name) {
         .eq("status", "available");
 
     logError("getStock", error);
-    return count ?? 0;
+
+    return Number(count || 0);
 }
 
-// ================= RANDOM KEY =================
+// ================= RANDOM KEY (SAFE) =================
 async function getRandomKey(product_name) {
+
     const { data, error } = await supabase
         .from("keys")
         .select("*")
@@ -98,23 +101,33 @@ async function getRandomKey(product_name) {
 
     if (!Array.isArray(data) || data.length === 0) return null;
 
-    return data[Math.floor(Math.random() * data.length)];
+    // random กัน predictable
+    const idx = Math.floor(Math.random() * data.length);
+    return data[idx];
 }
 
-// 🔥 FIX: atomic lock (กันกดซ้ำ)
+// ================= USE KEY (ATOMIC FIX) =================
 async function useKey(keyId) {
+
+    if (!keyId) return null;
+
     const { data, error } = await supabase
         .from("keys")
-        .update({ status: "used" })
+        .update({
+            status: "used",
+            used_at: new Date().toISOString()
+        })
         .eq("id", keyId)
-        .eq("status", "available") // กันซ้ำ
+        .eq("status", "available") // กันกดซ้ำ
         .select()
         .single();
 
     logError("useKey", error);
+
     return data || null;
 }
 
+// ================= EXPORT =================
 module.exports = {
     supabase,
     addProduct,

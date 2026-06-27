@@ -2,7 +2,6 @@ require("dotenv").config();
 const express = require("express");
 const app = express();
 
-// ================= EXPRESS =================
 app.get("/", (req, res) => res.send("VEX BOT ONLINE"));
 
 app.listen(process.env.PORT || 10000, () => {
@@ -19,15 +18,14 @@ const {
     ButtonStyle,
     Events,
     StringSelectMenuBuilder,
-    MessageFlags,
     ModalBuilder,
     TextInputBuilder,
-    TextInputStyle
+    TextInputStyle,
+    MessageFlags
 } = require("discord.js");
 
 const db = require("./database/database");
 
-// ================= CLIENT =================
 const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
@@ -39,8 +37,15 @@ const STOCK_LOG = process.env.STOCK_LOG_CHANNEL_ID;
 // ================= READY =================
 client.once(Events.ClientReady, () => {
     console.log(`✅ Logged in as ${client.user.tag}`);
-    console.log("🔥 BOT READY");
 });
+
+// ================= SAFE REPLY =================
+async function safeReply(interaction, data) {
+    try {
+        if (interaction.replied || interaction.deferred) return;
+        await interaction.reply(data);
+    } catch (e) {}
+}
 
 // ================= MAIN =================
 client.on(Events.InteractionCreate, async (interaction) => {
@@ -50,7 +55,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (interaction.isChatInputCommand() && interaction.commandName === "panel") {
 
             const embed = new EmbedBuilder()
-                .setTitle("📦 VEX STOCK PANEL")
+                .setTitle("📦 STOCK PANEL")
                 .setColor("Blue");
 
             const row = new ActionRowBuilder().addComponents(
@@ -72,25 +77,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
         if (interaction.isButton() && interaction.customId === "addstock") {
 
             const products = await db.getProducts();
-
-            if (!products?.length) {
-                return interaction.reply({
-                    content: "❌ ไม่มีสินค้า",
-                    flags: MessageFlags.Ephemeral
-                });
-            }
+            if (!products.length) return safeReply(interaction, { content: "❌ no product", flags: MessageFlags.Ephemeral });
 
             const menu = new StringSelectMenuBuilder()
                 .setCustomId("stock_select")
                 .setPlaceholder("เลือกสินค้า")
                 .addOptions(
-                    products.slice(0, 25).map(p => ({
+                    products.map(p => ({
                         label: p.name,
                         value: p.name
                     }))
                 );
 
-            return interaction.reply({
+            return safeReply(interaction, {
                 content: "📦 เลือกสินค้า",
                 components: [new ActionRowBuilder().addComponents(menu)],
                 flags: MessageFlags.Ephemeral
@@ -124,32 +123,28 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
             let keys = interaction.fields.getTextInputValue("keys")
                 .split("\n")
-                .map(v => v.trim())
+                .map(x => x.trim())
                 .filter(Boolean);
 
-            keys = [...new Set(keys)];
-
             await db.addKeys(product, keys);
+
             const stock = await db.getStock(product);
 
             const log = new EmbedBuilder()
                 .setTitle("📥 STOCK ADDED")
                 .addFields(
                     { name: "Product", value: product },
-                    { name: "Amount", value: `${keys.length}` },
-                    { name: "Stock Left", value: `${stock.count}` }
+                    { name: "Added", value: `${keys.length}` },
+                    { name: "Stock", value: `${stock.count}` }
                 )
                 .setColor("Green");
 
             if (STOCK_LOG) client.channels.cache.get(STOCK_LOG)?.send({ embeds: [log] });
 
-            return interaction.reply({
-                content: `✅ เพิ่ม ${keys.length} keys`,
-                flags: MessageFlags.Ephemeral
-            });
+            return interaction.reply({ content: `✅ added ${keys.length}`, flags: MessageFlags.Ephemeral });
         }
 
-        // ================= SELL BUTTON =================
+        // ================= SELL =================
         if (interaction.isButton() && interaction.customId === "sell") {
 
             const products = await db.getProducts();
@@ -157,12 +152,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const menu = new StringSelectMenuBuilder()
                 .setCustomId("sell_select")
                 .setPlaceholder("เลือกสินค้า")
-                .addOptions(
-                    products.slice(0, 25).map(p => ({
-                        label: p.name,
-                        value: p.name
-                    }))
-                );
+                .addOptions(products.map(p => ({
+                    label: p.name,
+                    value: p.name
+                })));
 
             return interaction.reply({
                 content: "📦 เลือกสินค้า",
@@ -201,25 +194,19 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const key = await db.getRandomKey(product);
             const stock = await db.getStock(product);
 
-            if (!p) {
-                return interaction.reply({ content: "❌ no product", flags: MessageFlags.Ephemeral });
-            }
+            if (!p) return safeReply(interaction, { content: "no product", flags: MessageFlags.Ephemeral });
+            if (!key) return safeReply(interaction, { content: "out of stock", flags: MessageFlags.Ephemeral });
 
-            if (!key) {
-                return interaction.reply({ content: "❌ out of stock", flags: MessageFlags.Ephemeral });
-            }
-
-            const cost = Number(p.cost || 0);
+            const cost = Number(p.cost);
             const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
             const profit = price - cost;
 
             const embed = new EmbedBuilder()
-                .setTitle("🔑 CONFIRM SELL")
+                .setTitle("CONFIRM SELL")
                 .addFields(
                     { name: "Product", value: product },
                     { name: "Type", value: type },
                     { name: "Price", value: `${price}` },
-                    { name: "Cost", value: `${cost}` },
                     { name: "Profit", value: `${profit}` },
                     { name: "Stock", value: `${stock.count}` }
                 )
@@ -228,7 +215,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder()
                     .setCustomId(`confirm_${product}_${type}`)
-                    .setLabel("CONFIRM SELL")
+                    .setLabel("CONFIRM")
                     .setStyle(ButtonStyle.Success)
             );
 
@@ -239,7 +226,7 @@ client.on(Events.InteractionCreate, async (interaction) => {
             });
         }
 
-        // ================= CONFIRM SELL =================
+        // ================= CONFIRM =================
         if (interaction.isButton() && interaction.customId.startsWith("confirm_")) {
 
             const [, product, type] = interaction.customId.split("_");
@@ -247,21 +234,18 @@ client.on(Events.InteractionCreate, async (interaction) => {
             const p = await db.getProduct(product);
             const key = await db.getRandomKey(product);
 
-            if (!p || !key) {
-                return interaction.reply({ content: "❌ error", flags: MessageFlags.Ephemeral });
-            }
+            if (!p || !key) return safeReply(interaction, { content: "error", flags: MessageFlags.Ephemeral });
 
-            const cost = Number(p.cost || 0);
+            const cost = Number(p.cost);
             const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
             const profit = price - cost;
 
-            // 🔥 IMPORTANT: mark key used (FIX STOCK BUG)
             await db.useKey(key.id);
 
             const stock = await db.getStock(product);
 
             const log = new EmbedBuilder()
-                .setTitle("🔑 SELL LOG")
+                .setTitle("SELL LOG")
                 .addFields(
                     { name: "User", value: `<@${interaction.user.id}>` },
                     { name: "Product", value: product },
@@ -275,20 +259,13 @@ client.on(Events.InteractionCreate, async (interaction) => {
             if (SELL_LOG) client.channels.cache.get(SELL_LOG)?.send({ embeds: [log] });
 
             return interaction.reply({
-                content: `🔑 KEY: ${key.key}`,
+                content: `KEY: ${key.key}`,
                 flags: MessageFlags.Ephemeral
             });
         }
 
     } catch (err) {
-        console.log("❌ ERROR:", err);
-
-        if (!interaction.replied) {
-            return interaction.reply({
-                content: "❌ error",
-                flags: MessageFlags.Ephemeral
-            });
-        }
+        console.log(err);
     }
 });
 

@@ -34,9 +34,13 @@ const log = (msg) => console.log(`[SYSTEM] ${msg}`);
 
 // ================= SAFE REPLY =================
 async function safeReply(interaction, data) {
-    if (interaction.deferred) return interaction.editReply(data);
-    if (interaction.replied) return interaction.followUp(data);
-    return interaction.reply(data);
+    try {
+        if (interaction.deferred) return interaction.editReply(data);
+        if (interaction.replied) return interaction.followUp(data);
+        return interaction.reply(data);
+    } catch (e) {
+        console.log("safeReply error:", e?.message || e);
+    }
 }
 
 // ================= READY =================
@@ -72,7 +76,7 @@ try {
         });
     }
 
-    // ================= ADD STOCK =================
+    // ================= ADD STOCK (FIXED) =================
     if (interaction.isButton() && interaction.customId === "addstock") {
 
         const products = await db.getProducts();
@@ -90,7 +94,7 @@ try {
             );
 
         return interaction.reply({
-            content: "📦 เลือกสินค้า (เติมสต็อก)",
+            content: "📦 เลือกสินค้าที่ต้องการเติมสต็อก",
             components: [new ActionRowBuilder().addComponents(menu)],
             ephemeral: true
         });
@@ -120,7 +124,7 @@ try {
         });
     }
 
-    // ================= SELECT SELL =================
+    // ================= SELL SELECT =================
     if (interaction.isStringSelectMenu() && interaction.customId === "sell_select") {
 
         const product = interaction.values[0];
@@ -211,14 +215,6 @@ try {
                 reserve.delete(interaction.user.id);
                 return interaction.editReply("❌ คีย์หมด");
             }
-
-            const p = await db.getProduct(product);
-            const stock = await db.getStock(product);
-
-            const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
-            const cost = Number(p.cost || 0);
-
-            log(`SELL ${interaction.user.tag} | ${product} | ${type}`);
 
             reserve.delete(interaction.user.id);
 

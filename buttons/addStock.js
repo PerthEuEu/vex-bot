@@ -18,35 +18,46 @@ async function safeReply(interaction, payload) {
 module.exports = async (interaction) => {
     try {
 
+        // ================= VALIDATION =================
+        if (!interaction || !interaction.isRepliable?.()) {
+            return console.log("Invalid interaction");
+        }
+
+        // ================= GET CATEGORIES =================
         const categories = await db.getCategories?.();
 
-        if (!Array.isArray(categories) || categories.length === 0) {
+        if (!categories || !Array.isArray(categories) || categories.length === 0) {
             return safeReply(interaction, {
-                content: "❌ ไม่มีหมวดหมู่ในระบบ",
+                content: "❌ ไม่มีหมวดหมู่ในระบบ (getCategories ว่างหรือยังไม่ได้สร้าง)",
                 ephemeral: true
             });
         }
 
+        // ================= BUILD MENU =================
         const menu = new StringSelectMenuBuilder()
             .setCustomId("stock_select_category")
             .setPlaceholder("📂 เลือกหมวดหมู่")
             .addOptions(
                 categories.slice(0, 25).map(c => ({
-                    label: c.name,
-                    value: c.name
+                    label: String(c.name).slice(0, 100), // กันพัง Discord limit
+                    value: String(c.name).slice(0, 100)
                 }))
             );
 
+        // ================= RESPONSE =================
         return safeReply(interaction, {
             content: "📂 เลือกหมวดหมู่",
-            components: [new ActionRowBuilder().addComponents(menu)],
+            components: [
+                new ActionRowBuilder().addComponents(menu)
+            ],
             ephemeral: true
         });
 
     } catch (err) {
-        console.log("addstock error:", err);
+        console.log("addStock ERROR:", err);
+
         return safeReply(interaction, {
-            content: "❌ error",
+            content: "❌ ระบบ addStock error",
             ephemeral: true
         });
     }

@@ -12,20 +12,24 @@ function norm(str) {
 
 // ================= PRODUCTS =================
 async function getProducts() {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from("products")
         .select("*")
         .order("name", { ascending: true });
+
+    if (error) console.log("getProducts error:", error);
 
     return data || [];
 }
 
 async function getProduct(name) {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from("products")
         .select("*")
         .eq("name", name)
         .maybeSingle();
+
+    if (error) console.log("getProduct error:", error);
 
     return data || null;
 }
@@ -33,41 +37,56 @@ async function getProduct(name) {
 // ================= ADD KEYS =================
 async function addKeys(product_name, keys) {
 
-    const rows = keys.map(k => ({
-        product_name: norm(product_name),
-        key: k.trim(),
-        status: "available"
-    }));
+    const name = norm(product_name);
 
-    const { error } = await supabase
+    const rows = keys
+        .map(k => k.trim())
+        .filter(Boolean)
+        .map(k => ({
+            product_name: name,
+            key: k,
+            status: "available",
+            used_at: null
+        }));
+
+    const { data, error } = await supabase
         .from("keys")
-        .insert(rows);
+        .insert(rows)
+        .select();
 
-    if (error) console.log("addKeys error:", error);
+    if (error) {
+        console.log("addKeys error:", error);
+        return [];
+    }
 
-    return true;
+    return data || [];
 }
 
 // ================= STOCK =================
 async function getStock(product_name) {
 
+    const name = norm(product_name);
+
     const { count, error } = await supabase
         .from("keys")
         .select("*", { count: "exact", head: true })
-        .eq("product_name", norm(product_name))
+        .eq("product_name", name)
         .eq("status", "available");
 
-    if (error) console.log("stock error:", error);
+    if (error) {
+        console.log("stock error:", error);
+        return 0;
+    }
 
     return count || 0;
 }
 
-// ================= CLAIM KEY (FIXED) =================
+// ================= CLAIM KEY (FIXED SAFE VERSION) =================
 async function claimKey(product_name) {
 
     const name = norm(product_name);
 
-    // 🔥 STEP 1: lock row (limit 1)
+    // 🔥 STEP 1: ดึง key ตัวเดียว
     const { data, error } = await supabase
         .from("keys")
         .select("id, key")
@@ -76,7 +95,7 @@ async function claimKey(product_name) {
         .limit(1);
 
     if (error) {
-        console.log("claimKey select error:", error);
+        console.log("claim select error:", error);
         return null;
     }
 
@@ -84,7 +103,7 @@ async function claimKey(product_name) {
 
     const key = data[0];
 
-    // 🔥 STEP 2: atomic update
+    // 🔥 STEP 2: lock แบบ atomic
     const { data: updated, error: updateError } = await supabase
         .from("keys")
         .update({
@@ -93,19 +112,20 @@ async function claimKey(product_name) {
         })
         .eq("id", key.id)
         .eq("status", "available")
-        .select();
+        .select("id, key")
+        .maybeSingle();
 
     if (updateError) {
-        console.log("claimKey update error:", updateError);
+        console.log("claim update error:", updateError);
         return null;
     }
 
-    if (!updated || updated.length === 0) return null;
+    if (!updated) return null;
 
     return key;
 }
 
-// ================= BACKUP USE =================
+// ================= USE KEY (BACKUP FORCE) =================
 async function useKey(id) {
     const { data, error } = await supabase
         .from("keys")

@@ -33,10 +33,13 @@ const client = new Client({
 const SELL_LOG = process.env.SELL_LOG_CHANNEL_ID;
 const STOCK_LOG = process.env.STOCK_LOG_CHANNEL_ID;
 
+// ================= SAFE LOG =================
 function sendLog(channelId, embed) {
     if (!channelId) return;
     const ch = client.channels.cache.get(channelId);
-    if (ch) ch.send({ embeds: [embed] }).catch(() => {});
+    if (!ch) return;
+
+    ch.send({ embeds: [embed] }).catch(console.error);
 }
 
 // ================= READY =================
@@ -77,16 +80,20 @@ try {
     if (interaction.isButton() && interaction.customId === "stock_open") {
 
         const products = await db.getProducts();
-        if (!products?.length)
+
+        if (!products || products.length === 0) {
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
+        }
 
         const menu = new StringSelectMenuBuilder()
             .setCustomId("stock_select")
             .setPlaceholder("เลือกสินค้า")
-            .addOptions(products.slice(0, 25).map(p => ({
-                label: p.name,
-                value: p.name
-            })));
+            .addOptions(
+                products.slice(0, 25).map(p => ({
+                    label: p.name,
+                    value: p.name
+                }))
+            );
 
         return interaction.reply({
             content: "📦 เลือกสินค้า",
@@ -117,32 +124,33 @@ try {
         return interaction.showModal(modal);
     }
 
-    // ================= ADD STOCK (LOG IN) =================
+    // ================= ADD STOCK =================
     if (interaction.isModalSubmit() && interaction.customId.startsWith("add_stock_")) {
 
         const product = interaction.customId.replace("add_stock_", "");
 
         const keys = interaction.fields.getTextInputValue("keys")
             .split("\n")
-            .map(v => v.trim())
+            .map(x => x.trim())
             .filter(Boolean);
 
-        if (!keys.length)
+        if (keys.length === 0) {
             return interaction.reply({ content: "❌ ไม่มี key", ephemeral: true });
+        }
 
         const inserted = await db.addKeys(product, keys);
         const stock = await db.getStock(product);
 
-        const embed = new EmbedBuilder()
-            .setTitle("📥 STOCK IN (ADD)")
-            .addFields(
-                { name: "Product", value: product },
-                { name: "Added", value: String(inserted.length) },
-                { name: "Stock Left", value: String(stock.count) }
-            )
-            .setColor("Green");
-
-        sendLog(STOCK_LOG, embed);
+        sendLog(STOCK_LOG,
+            new EmbedBuilder()
+                .setTitle("📥 STOCK IN")
+                .addFields(
+                    { name: "Product", value: product },
+                    { name: "Added", value: String(inserted.length) },
+                    { name: "Stock Left", value: String(stock) }
+                )
+                .setColor("Green")
+        );
 
         return interaction.reply({
             content: `✅ เพิ่ม ${inserted.length} keys`,
@@ -154,16 +162,20 @@ try {
     if (interaction.isButton() && interaction.customId === "sell_open") {
 
         const products = await db.getProducts();
-        if (!products?.length)
+
+        if (!products || products.length === 0) {
             return interaction.reply({ content: "❌ ไม่มีสินค้า", ephemeral: true });
+        }
 
         const menu = new StringSelectMenuBuilder()
             .setCustomId("sell_select")
             .setPlaceholder("เลือกสินค้า")
-            .addOptions(products.slice(0, 25).map(p => ({
-                label: p.name,
-                value: p.name
-            })));
+            .addOptions(
+                products.slice(0, 25).map(p => ({
+                    label: p.name,
+                    value: p.name
+                }))
+            );
 
         return interaction.reply({
             content: "📦 เลือกสินค้า",
@@ -201,20 +213,19 @@ try {
         const p = await db.getProduct(product);
         const key = await db.claimKey(product);
 
-        if (!p)
+        if (!p) {
             return interaction.reply({ content: "❌ no product", ephemeral: true });
+        }
 
-        if (!key)
+        if (!key) {
             return interaction.reply({ content: "❌ out of stock", ephemeral: true });
+        }
 
-        const price = type === "reseller"
-            ? Number(p.resell_price)
-            : Number(p.customer_price);
-
+        const price = Number(type === "reseller" ? p.resell_price : p.customer_price);
         const cost = Number(p.cost || 0);
         const profit = price - cost;
 
-        // ================= SELL LOG (OUT + PROFIT) =================
+        // ================= SELL LOG =================
         sendLog(SELL_LOG,
             new EmbedBuilder()
                 .setTitle("🔑 SELL OUT")

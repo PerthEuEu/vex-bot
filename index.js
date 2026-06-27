@@ -29,7 +29,7 @@ const client = new Client({
     intents: [GatewayIntentBits.Guilds]
 });
 
-// ================= LOG =================
+// ================= LOG CHANNEL =================
 const SELL_LOG = process.env.SELL_LOG_CHANNEL_ID;
 const STOCK_LOG = process.env.STOCK_LOG_CHANNEL_ID;
 
@@ -117,7 +117,7 @@ try {
         return interaction.showModal(modal);
     }
 
-    // ================= ADD STOCK =================
+    // ================= ADD STOCK (LOG IN) =================
     if (interaction.isModalSubmit() && interaction.customId.startsWith("add_stock_")) {
 
         const product = interaction.customId.replace("add_stock_", "");
@@ -134,7 +134,7 @@ try {
         const stock = await db.getStock(product);
 
         const embed = new EmbedBuilder()
-            .setTitle("📥 STOCK ADDED")
+            .setTitle("📥 STOCK IN (ADD)")
             .addFields(
                 { name: "Product", value: product },
                 { name: "Added", value: String(inserted.length) },
@@ -199,8 +199,6 @@ try {
         const type = interaction.values[0];
 
         const p = await db.getProduct(product);
-
-        // 🔥 IMPORTANT: atomic claim กันคีย์ซ้ำ
         const key = await db.claimKey(product);
 
         if (!p)
@@ -209,16 +207,25 @@ try {
         if (!key)
             return interaction.reply({ content: "❌ out of stock", ephemeral: true });
 
-        const price = type === "reseller" ? p.resell_price : p.customer_price;
+        const price = type === "reseller"
+            ? Number(p.resell_price)
+            : Number(p.customer_price);
 
-        // log sell
+        const cost = Number(p.cost || 0);
+        const profit = price - cost;
+
+        // ================= SELL LOG (OUT + PROFIT) =================
         sendLog(SELL_LOG,
             new EmbedBuilder()
-                .setTitle("🔑 SELL")
+                .setTitle("🔑 SELL OUT")
                 .addFields(
                     { name: "Product", value: product },
                     { name: "Key", value: key.key },
-                    { name: "User", value: `<@${interaction.user.id}>` }
+                    { name: "Buyer", value: `<@${interaction.user.id}>` },
+                    { name: "Type", value: type },
+                    { name: "Price", value: String(price) },
+                    { name: "Cost", value: String(cost) },
+                    { name: "Profit", value: String(profit) }
                 )
                 .setColor("Red")
         );

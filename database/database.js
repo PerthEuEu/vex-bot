@@ -5,6 +5,11 @@ const supabase = createClient(
     process.env.SUPABASE_KEY
 );
 
+// ================= NORMALIZE =================
+function norm(str) {
+    return (str || "").trim().toLowerCase();
+}
+
 // ================= PRODUCTS =================
 async function getProducts() {
     const { data } = await supabase
@@ -29,54 +34,57 @@ async function getProduct(name) {
 async function addKeys(product_name, keys) {
 
     const rows = keys.map(k => ({
-        product_name,
-        key: k,
+        product_name: norm(product_name),
+        key: k.trim(),
         status: "available"
     }));
 
-    const { data, error } = await supabase
+    const { error } = await supabase
         .from("keys")
-        .insert(rows)
-        .select();
+        .insert(rows);
 
     if (error) console.log("addKeys error:", error);
 
-    return data || [];
+    return true;
 }
 
 // ================= STOCK =================
 async function getStock(product_name) {
 
-    const { count } = await supabase
+    const { count, error } = await supabase
         .from("keys")
         .select("*", { count: "exact", head: true })
-        .eq("product_name", product_name)
+        .eq("product_name", norm(product_name))
         .eq("status", "available");
 
-    return { count: count || 0 };
+    if (error) console.log("stock error:", error);
+
+    return count || 0;
 }
 
-// ================= 🔥 ATOMIC KEY CLAIM (FIX DUPLICATE BUG) =================
+// ================= CLAIM KEY (FIXED) =================
 async function claimKey(product_name) {
 
-    // 🔥 STEP 1: ดึง key ที่ยังว่าง
-    const { data: keys, error } = await supabase
+    const name = norm(product_name);
+
+    // 🔥 STEP 1: lock row (limit 1)
+    const { data, error } = await supabase
         .from("keys")
         .select("id, key")
-        .eq("product_name", product_name)
+        .eq("product_name", name)
         .eq("status", "available")
         .limit(1);
 
     if (error) {
-        console.log("claimKey error:", error);
+        console.log("claimKey select error:", error);
         return null;
     }
 
-    if (!keys || keys.length === 0) return null;
+    if (!data || data.length === 0) return null;
 
-    const key = keys[0];
+    const key = data[0];
 
-    // 🔥 STEP 2: ล็อก key ทันที (กันซ้ำ)
+    // 🔥 STEP 2: atomic update
     const { data: updated, error: updateError } = await supabase
         .from("keys")
         .update({
@@ -84,24 +92,22 @@ async function claimKey(product_name) {
             used_at: new Date().toISOString()
         })
         .eq("id", key.id)
-        .eq("status", "available") // 🔥 กัน race condition
-        .select()
-        .maybeSingle();
+        .eq("status", "available")
+        .select();
 
     if (updateError) {
         console.log("claimKey update error:", updateError);
         return null;
     }
 
-    // ถ้า update ไม่สำเร็จ = มีคนเอาไปแล้ว
-    if (!updated) return null;
+    if (!updated || updated.length === 0) return null;
 
     return key;
 }
 
-// ================= MARK USED (backup) =================
+// ================= BACKUP USE =================
 async function useKey(id) {
-    const { data } = await supabase
+    const { data, error } = await supabase
         .from("keys")
         .update({
             status: "used",
@@ -110,6 +116,8 @@ async function useKey(id) {
         .eq("id", id)
         .select()
         .maybeSingle();
+
+    if (error) console.log("useKey error:", error);
 
     return data || null;
 }
